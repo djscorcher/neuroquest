@@ -830,9 +830,9 @@ export default function App() {
     <>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600&display=swap');*{box-sizing:border-box;margin:0;padding:0;}body{background:#020d1f;}@keyframes fadeOut{0%{opacity:1}60%{opacity:1}100%{opacity:0}}@keyframes scaleIn{from{transform:scale(0.5);opacity:0}to{transform:scale(1);opacity:1}}@keyframes gridMove{from{background-position:0 0}to{background-position:0 60px}}@keyframes floatUp{0%{transform:translateY(0);opacity:1}100%{transform:translateY(-60px);opacity:0}}@keyframes slideIn{from{transform:translateY(12px);opacity:0}to{transform:translateY(0);opacity:1}}@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}input::placeholder{color:#2a5070;}::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-thumb{background:#00b4ff44;border-radius:2px;}input[type=range]{height:4px;}`}</style>
 
-      {screen==="loading"&&<LoadingScreen onDone={()=>setScreen(localStorage.getItem("nq_playerName")?"game":"name")} t={t}/>}
+      {screen==="loading"&&<LoadingScreen onDone={()=>setScreen(localStorage.getItem("nq_onboarded")?"game":"name")} t={t}/>}
       {screen==="name"&&<NameScreen onNext={n=>{setPlayerName(n);setScreen("goals");}} t={t}/>}
-      {screen==="goals"&&<GoalsScreen playerName={playerName} onNext={starter=>{setTasks(starter);setScreen("game");}} t={t}/>}
+      {screen==="goals"&&<GoalsScreen playerName={playerName} onNext={starter=>{setTasks(starter);localStorage.setItem("nq_onboarded","1");setScreen("game");}} t={t}/>}
 
       {screen==="game"&&(
         <>
