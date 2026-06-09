@@ -773,15 +773,12 @@ function AuthModal({ open, onClose, guestXp, t }) {
   const handleSignUp = async () => {
     if (!username.trim() || !email.trim() || password.length < 6) return;
     setLoading(true); setError("");
-    const { data, error: authErr } = await supabase.auth.signUp({ email, password });
+    const guestLevel = Math.floor(guestXp / XP_PER_LEVEL) + 1;
+    const { error: authErr } = await supabase.auth.signUp({
+      email, password,
+      options: { data: { username: username.trim().toUpperCase(), xp: guestXp, level: guestLevel } },
+    });
     if (authErr) { setError(authErr.message); setLoading(false); return; }
-    if (data.user) {
-      const guestLevel = Math.floor(guestXp / XP_PER_LEVEL) + 1;
-      const { error: profErr } = await supabase.from("profiles").insert({
-        id: data.user.id, username: username.trim().toUpperCase(), email, xp: guestXp, level: guestLevel,
-      });
-      if (profErr) { setError(profErr.message); setLoading(false); return; }
-    }
     setLoading(false); reset(); onClose();
   };
 
