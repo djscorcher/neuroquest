@@ -765,11 +765,10 @@ function AuthModal({ open, onClose, guestXp, t }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [signUpDone, setSignUpDone] = useState(false);
 
   if (!open) return null;
 
-  const reset = () => { setUsername(""); setEmail(""); setPassword(""); setError(""); setLoading(false); setSignUpDone(false); };
+  const reset = () => { setUsername(""); setEmail(""); setPassword(""); setError(""); setLoading(false); };
 
   const handleSignUp = async () => {
     if (!username.trim() || !email.trim() || password.length < 6) return;
@@ -780,7 +779,7 @@ function AuthModal({ open, onClose, guestXp, t }) {
       options: { data: { username: username.trim().toUpperCase(), xp: guestXp, level: guestLevel } },
     });
     if (authErr) { setError(authErr.message); setLoading(false); return; }
-    setLoading(false); setSignUpDone(true);
+    setLoading(false); reset(); onClose();
   };
 
   const handleSignIn = async () => {
@@ -805,17 +804,6 @@ function AuthModal({ open, onClose, guestXp, t }) {
 
   const inp = { width:"100%",background:`${t.primary}11`,border:`1px solid ${t.primary}44`,borderRadius:8,padding:"11px 14px",color:"#e0f0ff",fontFamily:"'Exo 2',sans-serif",fontSize:14,outline:"none",marginBottom:12 };
   const primaryBtn = { width:"100%",padding:"12px 0",fontFamily:"'Orbitron',monospace",fontSize:11,letterSpacing:"0.12em",border:"none",borderRadius:8,fontWeight:700,marginBottom:10,transition:"all 0.2s" };
-
-  if (signUpDone) return (
-    <div style={{ position:"fixed",inset:0,zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.75)",backdropFilter:"blur(4px)",padding:16 }}>
-      <div style={{ width:"100%",maxWidth:400,background:t.card,backdropFilter:"blur(24px)",border:`1px solid ${t.secondary}55`,borderRadius:16,padding:"36px 24px",textAlign:"center",animation:"scaleIn 0.25s cubic-bezier(0.34,1.56,0.64,1) forwards" }}>
-        <div style={{ fontSize:36,marginBottom:16 }}>✉️</div>
-        <div style={{ fontFamily:"'Orbitron',monospace",fontSize:13,fontWeight:700,color:t.secondary,letterSpacing:"0.1em",marginBottom:12 }}>CHECK YOUR EMAIL</div>
-        <div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:t.accent,marginBottom:24,lineHeight:1.6 }}>We sent a confirmation link to <strong style={{ color:"#e0f0ff" }}>{email}</strong>. Click it to activate your account, then sign in.</div>
-        <button onClick={()=>{setSignUpDone(false);setMode("signin");}} style={{ width:"100%",padding:"12px 0",fontFamily:"'Orbitron',monospace",fontSize:11,letterSpacing:"0.12em",background:`linear-gradient(135deg,${t.primary},${t.secondary})`,border:"none",borderRadius:8,cursor:"pointer",color:t.bg,fontWeight:700,boxShadow:`0 0 16px ${t.primary}66` }}>GO TO SIGN IN</button>
-      </div>
-    </div>
-  );
 
   return (
     <div style={{ position:"fixed",inset:0,zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.75)",backdropFilter:"blur(4px)",padding:16 }}
