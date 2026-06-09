@@ -887,6 +887,7 @@ export default function App() {
   const [profile,setProfile]=useState(null);
   const [showAuthModal,setShowAuthModal]=useState(false);
   const [deleteConfirm,setDeleteConfirm]=useState(false);
+  const [deleteError,setDeleteError]=useState("");
   const inputRef=useRef();
   const prevXpRef=useRef(0);
   const play=useSound();
@@ -995,7 +996,9 @@ export default function App() {
   const deleteTask=id=>{setTasks(prev=>prev.filter(x=>x.id!==id));if(editingId===id)resetForm();play("delete");};
   const deleteMissed=id=>{setMissed(prev=>prev.filter(x=>x.id!==id));play("delete");};
   const handleDeleteAccount = async () => {
-    await supabase.rpc("delete_user");
+    setDeleteError("");
+    const { error } = await supabase.rpc("delete_user");
+    if (error) { setDeleteError(error.message); return; }
     await supabase.auth.signOut();
     setDeleteConfirm(false);
   };
@@ -1049,10 +1052,13 @@ export default function App() {
                         <button onClick={()=>setDeleteConfirm(true)} style={{ padding:"5px 12px",fontFamily:"'Orbitron',monospace",fontSize:8,letterSpacing:"0.1em",background:"transparent",border:"1px solid rgba(255,80,80,0.35)",borderRadius:6,cursor:"pointer",color:t.danger,transition:"all 0.2s" }}>DELETE ACCOUNT</button>
                       </div>
                       {deleteConfirm&&(
-                        <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                          <span style={{ fontFamily:"'Exo 2',sans-serif",fontSize:11,color:t.danger }}>Delete your account permanently?</span>
-                          <button onClick={handleDeleteAccount} style={{ padding:"4px 12px",fontFamily:"'Orbitron',monospace",fontSize:8,background:"rgba(255,80,80,0.2)",border:"1px solid #ff6060",borderRadius:6,color:"#ff6060",cursor:"pointer" }}>YES, DELETE</button>
-                          <button onClick={()=>setDeleteConfirm(false)} style={{ padding:"4px 12px",fontFamily:"'Orbitron',monospace",fontSize:8,background:"transparent",border:`1px solid ${t.border}`,borderRadius:6,color:t.accent,cursor:"pointer" }}>CANCEL</button>
+                        <div style={{ display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6 }}>
+                          <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                            <span style={{ fontFamily:"'Exo 2',sans-serif",fontSize:11,color:t.danger }}>Delete your account permanently?</span>
+                            <button onClick={handleDeleteAccount} style={{ padding:"4px 12px",fontFamily:"'Orbitron',monospace",fontSize:8,background:"rgba(255,80,80,0.2)",border:"1px solid #ff6060",borderRadius:6,color:"#ff6060",cursor:"pointer" }}>YES, DELETE</button>
+                            <button onClick={()=>{setDeleteConfirm(false);setDeleteError("");}} style={{ padding:"4px 12px",fontFamily:"'Orbitron',monospace",fontSize:8,background:"transparent",border:`1px solid ${t.border}`,borderRadius:6,color:t.accent,cursor:"pointer" }}>CANCEL</button>
+                          </div>
+                          {deleteError&&<span style={{ fontFamily:"'Exo 2',sans-serif",fontSize:10,color:t.danger }}>{deleteError}</span>}
                         </div>
                       )}
                     </div>
