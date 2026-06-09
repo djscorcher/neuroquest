@@ -1,21 +1,21 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const XP_TABLE = { Easy: 10, Medium: 25, Hard: 50 };
+const DIFFICULTY_BASE       = { Easy: 10, Medium: 25, Hard: 50 };
+const IMPORTANCE_MULT       = { Low: 1.0, Medium: 1.25, High: 1.5, Critical: 2.0 };
+const MAX_TIMING_BONUS_RATE = 1.0;
 const XP_PER_LEVEL = 100;
 
 const IMPORTANCE = {
-  Low:      { label: "Low",      mult: 0.5, color: "#7eb8ff" },
-  Medium:   { label: "Medium",   mult: 1.0, color: "#00b4ff" },
-  High:     { label: "High",     mult: 1.5, color: "#ffb454" },
-  Critical: { label: "Critical", mult: 2.5, color: "#ff5050" },
+  Low:      { label: "Low",      color: "#7eb8ff" },
+  Medium:   { label: "Medium",   color: "#00b4ff" },
+  High:     { label: "High",     color: "#ffb454" },
+  Critical: { label: "Critical", color: "#ff5050" },
 };
 const IMPORTANCE_ORDER = ["Low", "Medium", "High", "Critical"];
 
 const TIMER_MISS_PENALTY = 10;
 const DUE_MISS_PENALTY   = 15;
-const DUE_EARLY_PER_DAY  = 5;
-const DUE_DAY_CAP        = 7;
 
 const RANKS = [
   { min:1,  label:"RECRUIT"   }, { min:5,  label:"WARRIOR"   },
@@ -23,6 +23,32 @@ const RANKS = [
   { min:35, label:"CHAMPION"  }, { min:50, label:"LEGEND"     },
 ];
 const getRank = lvl => [...RANKS].reverse().find(r=>lvl>=r.min)?.label ?? "RECRUIT";
+
+const computeXp = (task, now) => {
+  const core = (DIFFICULTY_BASE[task.difficulty] ?? 10) * (IMPORTANCE_MULT[task.importance] ?? 1.0);
+  const hasTimer = task.scheduleType === "timer" && task.timerDeadline && task.timerSeconds;
+  const hasDue   = task.scheduleType === "due"   && task.dueDate;
+  let timerFrac = null, dueFrac = null;
+  if (hasTimer) {
+    const rem = task.timerDeadline - now;
+    timerFrac = rem > 0 ? Math.min(1, rem / (task.timerSeconds * 1000)) : 0;
+  }
+  if (hasDue) {
+    if (now >= task.dueDate) {
+      dueFrac = 0;
+    } else {
+      const created = task.createdAt ?? (task.dueDate - 7 * 24 * 60 * 60 * 1000);
+      const window  = task.dueDate - created;
+      dueFrac = window > 0 ? Math.min(1, (task.dueDate - now) / window) : 0;
+    }
+  }
+  let frac = 0;
+  if (timerFrac !== null && dueFrac !== null) frac = (timerFrac + dueFrac) / 2;
+  else if (timerFrac !== null) frac = timerFrac;
+  else if (dueFrac !== null)   frac = dueFrac;
+  frac = Math.min(1, Math.max(0, frac));
+  return Math.round(core + core * MAX_TIMING_BONUS_RATE * frac);
+};
 
 const THEMES = {
   techboy: {
@@ -51,6 +77,7 @@ const DIFF_COLORS = (t) => ({
 
 const defaultQuest = (over={}) => ({
   id: Date.now()+Math.random(),
+  createdAt: Date.now(),
   title: "", difficulty: "Medium", importance: "Medium",
   scheduleType: "none",
   timerDeadline: null, timerSeconds: null, timerMissed: false,
@@ -657,7 +684,7 @@ function QuestCard({ task, now, onComplete, onDelete, onEdit, onMove, isFirst, i
         <div title={imp.label+" importance"} style={{ width:9,height:9,borderRadius:"50%",flexShrink:0,background:imp.color,boxShadow:`0 0 8px ${imp.color}` }} />
         <div style={{ flex:1,minWidth:0,fontFamily:"'Exo 2',sans-serif",color:"#e0f0ff",fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{task.title}</div>
         <span style={{ fontFamily:"'Orbitron',monospace",fontSize:10,letterSpacing:"0.08em",color:dc.text,background:dc.bg,border:`1px solid ${dc.border}55`,padding:"3px 8px",borderRadius:99,flexShrink:0 }}>{task.difficulty}</span>
-        <span style={{ fontFamily:"'Orbitron',monospace",fontSize:11,color:dc.text,minWidth:36,textAlign:"right",flexShrink:0 }}>+{XP_TABLE[task.difficulty]}</span>
+        <span style={{ fontFamily:"'Orbitron',monospace",fontSize:11,color:dc.text,minWidth:36,textAlign:"right",flexShrink:0 }}>+{computeXp(task,now)}</span>
         <div style={{ display:"flex",gap:3,flexShrink:0 }}>
           {[["↑",!isFirst,()=>onMove(task.id,-1)],["↓",!isLast,()=>onMove(task.id,1)]].map(([icon,active,fn])=>(
             <button key={icon} onClick={fn} disabled={!active} style={{ width:22,height:22,borderRadius:4,border:`1px solid ${t.border}`,background:"transparent",color:active?t.accent:"#1a3050",cursor:active?"pointer":"default",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center" }}>{icon}</button>
@@ -679,7 +706,7 @@ function QuestCard({ task, now, onComplete, onDelete, onEdit, onMove, isFirst, i
 
 function CompletedCard({ task, t }) {
   const dc=DIFF_COLORS(t)[task.difficulty];
-  const awarded=task.awardedXp??XP_TABLE[task.difficulty];
+  const awarded=task.awardedXp??DIFFICULTY_BASE[task.difficulty];
   return (
     <div style={{ display:"flex",alignItems:"center",gap:12,background:`${t.card.replace("0.7","0.4")}`,border:`1px solid ${t.primary}1a`,borderRadius:10,padding:"11px 14px",marginBottom:8,opacity:0.7 }}>
       <div style={{ width:22,height:22,borderRadius:5,flexShrink:0,background:dc.bg,border:`2px solid ${dc.border}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:dc.text }}>✓</div>
@@ -776,7 +803,7 @@ export default function App() {
     let penalty=0;
     const records=[],respawns=[],removeIds=new Set();
     expired.forEach(tk=>{
-      const mult=IMPORTANCE[tk.importance]?.mult??1;
+      const mult=IMPORTANCE_MULT[tk.importance]??1;
       const reason=tk.scheduleType==="timer"?"timer":"due";
       const p=Math.round((reason==="timer"?TIMER_MISS_PENALTY:DUE_MISS_PENALTY)*mult);
       penalty+=p; records.push({...tk,missedReason:reason,penalty:p}); removeIds.add(tk.id);
@@ -798,7 +825,7 @@ export default function App() {
     if(!form.title.trim())return;
     const built=buildFromForm();
     if(editingId){setTasks(prev=>prev.map(x=>x.id===editingId?{...x,...built}:x));}
-    else{setTasks(prev=>[...prev,{id:Date.now()+Math.random(),...built}]);play("add");}
+    else{setTasks(prev=>[...prev,{id:Date.now()+Math.random(),createdAt:Date.now(),...built}]);play("add");}
     resetForm(); inputRef.current?.focus();
   };
   const startEdit=task=>{
@@ -808,10 +835,9 @@ export default function App() {
   };
   const completeTask=(id,e)=>{
     const task=tasks.find(x=>x.id===id);if(!task)return;
-    const mult=IMPORTANCE[task.importance]?.mult??1;
-    let bonus=0,timing="none";
-    if(task.scheduleType==="due"&&task.dueDate){const d=dayDiff(task.dueDate,Date.now());if(d>0){timing="early";bonus=Math.round(Math.min(d,DUE_DAY_CAP)*DUE_EARLY_PER_DAY*mult);}else timing="ontime";}
-    const total=XP_TABLE[task.difficulty]+bonus;
+    const total=computeXp(task,Date.now());
+    let timing="none";
+    if(task.scheduleType==="due"&&task.dueDate){const d=dayDiff(task.dueDate,Date.now());if(d>0)timing="early";else timing="ontime";}
     const rect=e?.currentTarget?.getBoundingClientRect?.();
     if(rect){const popup={id:Date.now(),xp:total,x:rect.left+rect.width/2-20,y:rect.top-10};setPopups(prev=>[...prev,popup]);setTimeout(()=>setPopups(prev=>prev.filter(p=>p.id!==popup.id)),1200);}
     const repeats=task.scheduleType==="due"&&task.repeat&&task.repeat!=="none";
