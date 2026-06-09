@@ -886,6 +886,7 @@ export default function App() {
   const [authUser,setAuthUser]=useState(null);
   const [profile,setProfile]=useState(null);
   const [showAuthModal,setShowAuthModal]=useState(false);
+  const [deleteConfirm,setDeleteConfirm]=useState(false);
   const inputRef=useRef();
   const prevXpRef=useRef(0);
   const play=useSound();
@@ -993,6 +994,12 @@ export default function App() {
   };
   const deleteTask=id=>{setTasks(prev=>prev.filter(x=>x.id!==id));if(editingId===id)resetForm();play("delete");};
   const deleteMissed=id=>{setMissed(prev=>prev.filter(x=>x.id!==id));play("delete");};
+  const handleDeleteAccount = async () => {
+    await supabase.rpc("delete_user");
+    await supabase.auth.signOut();
+    setDeleteConfirm(false);
+  };
+
   const moveTask=(id,dir)=>setTasks(prev=>{const i=prev.findIndex(x=>x.id===id);if(i<0)return prev;const ni=i+dir;if(ni<0||ni>=prev.length)return prev;const arr=[...prev];[arr[i],arr[ni]]=[arr[ni],arr[i]];return arr;});
 
   const TABS=[["active",`QUESTS (${tasks.length})`],["missed",`MISSED (${missed.length})`],["done",`DONE (${completed.length})`],["stats","STATS"]];
@@ -1035,9 +1042,19 @@ export default function App() {
                 <XPBar xp={xp} t={t}/>
                 <div style={{ marginTop:10,display:"flex",justifyContent:"flex-end",alignItems:"center",gap:8 }}>
                   {authUser ? (
-                    <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                      <span style={{ fontFamily:"'Orbitron',monospace",fontSize:9,color:t.accent,letterSpacing:"0.1em" }}>{profile?.username||authUser.email?.split("@")[0]?.toUpperCase()}</span>
-                      <button onClick={()=>supabase.auth.signOut()} style={{ padding:"5px 12px",fontFamily:"'Orbitron',monospace",fontSize:8,letterSpacing:"0.1em",background:"transparent",border:`1px solid ${t.border}`,borderRadius:6,cursor:"pointer",color:t.accent,transition:"all 0.2s" }}>SIGN OUT</button>
+                    <div style={{ display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6 }}>
+                      <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                        <span style={{ fontFamily:"'Orbitron',monospace",fontSize:9,color:t.accent,letterSpacing:"0.1em" }}>{profile?.username||authUser.email?.split("@")[0]?.toUpperCase()}</span>
+                        <button onClick={()=>supabase.auth.signOut()} style={{ padding:"5px 12px",fontFamily:"'Orbitron',monospace",fontSize:8,letterSpacing:"0.1em",background:"transparent",border:`1px solid ${t.border}`,borderRadius:6,cursor:"pointer",color:t.accent,transition:"all 0.2s" }}>SIGN OUT</button>
+                        <button onClick={()=>setDeleteConfirm(true)} style={{ padding:"5px 12px",fontFamily:"'Orbitron',monospace",fontSize:8,letterSpacing:"0.1em",background:"transparent",border:"1px solid rgba(255,80,80,0.35)",borderRadius:6,cursor:"pointer",color:t.danger,transition:"all 0.2s" }}>DELETE ACCOUNT</button>
+                      </div>
+                      {deleteConfirm&&(
+                        <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                          <span style={{ fontFamily:"'Exo 2',sans-serif",fontSize:11,color:t.danger }}>Delete your account permanently?</span>
+                          <button onClick={handleDeleteAccount} style={{ padding:"4px 12px",fontFamily:"'Orbitron',monospace",fontSize:8,background:"rgba(255,80,80,0.2)",border:"1px solid #ff6060",borderRadius:6,color:"#ff6060",cursor:"pointer" }}>YES, DELETE</button>
+                          <button onClick={()=>setDeleteConfirm(false)} style={{ padding:"4px 12px",fontFamily:"'Orbitron',monospace",fontSize:8,background:"transparent",border:`1px solid ${t.border}`,borderRadius:6,color:t.accent,cursor:"pointer" }}>CANCEL</button>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <button onClick={()=>setShowAuthModal(true)} style={{ padding:"6px 14px",fontFamily:"'Orbitron',monospace",fontSize:8,letterSpacing:"0.1em",background:`${t.primary}11`,border:`1px solid ${t.primary}44`,borderRadius:7,cursor:"pointer",color:t.primary,transition:"all 0.2s" }}>SIGN IN / CREATE ACCOUNT</button>
