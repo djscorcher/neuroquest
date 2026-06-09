@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { supabase } from "./supabaseClient";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const DIFFICULTY_BASE       = { Easy: 10, Medium: 25, Hard: 50 };
@@ -756,6 +757,118 @@ function StatsTab({ xp, level, tasks, completed, missed, t }) {
 // ── Main App ──────────────────────────────────────────────────────────────
 const BLANK_FORM={title:"",difficulty:"Medium",importance:"Medium",schedule:"none",h:0,m:25,s:0,dueDate:"",repeat:"none",repeatEvery:2};
 
+// ── Auth Modal ────────────────────────────────────────────────────────────
+function AuthModal({ open, onClose, guestXp, t }) {
+  const [mode, setMode] = useState("signin");
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  if (!open) return null;
+
+  const reset = () => { setUsername(""); setEmail(""); setPassword(""); setError(""); setLoading(false); };
+
+  const handleSignUp = async () => {
+    if (!username.trim() || !email.trim() || password.length < 6) return;
+    setLoading(true); setError("");
+    const { data, error: authErr } = await supabase.auth.signUp({ email, password });
+    if (authErr) { setError(authErr.message); setLoading(false); return; }
+    if (data.user) {
+      const guestLevel = Math.floor(guestXp / XP_PER_LEVEL) + 1;
+      const { error: profErr } = await supabase.from("profiles").insert({
+        id: data.user.id, username: username.trim().toUpperCase(), email, xp: guestXp, level: guestLevel,
+      });
+      if (profErr) { setError(profErr.message); setLoading(false); return; }
+    }
+    setLoading(false); reset(); onClose();
+  };
+
+  const handleSignIn = async () => {
+    if (!email.trim() || !password) return;
+    setLoading(true); setError("");
+    const { error: authErr } = await supabase.auth.signInWithPassword({ email, password });
+    if (authErr) { setError(authErr.message); setLoading(false); return; }
+    setLoading(false); reset(); onClose();
+  };
+
+  const handleGoogle = async () => {
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: "https://daynsxpdixvfkdnbumwi.supabase.co/auth/v1/callback" },
+    });
+  };
+
+  const isSignUp = mode === "signup";
+  const canSubmit = isSignUp
+    ? username.trim().length >= 2 && email.trim() && password.length >= 6
+    : email.trim() && password.length >= 1;
+
+  const inp = { width:"100%",background:`${t.primary}11`,border:`1px solid ${t.primary}44`,borderRadius:8,padding:"11px 14px",color:"#e0f0ff",fontFamily:"'Exo 2',sans-serif",fontSize:14,outline:"none",marginBottom:12 };
+  const primaryBtn = { width:"100%",padding:"12px 0",fontFamily:"'Orbitron',monospace",fontSize:11,letterSpacing:"0.12em",border:"none",borderRadius:8,fontWeight:700,marginBottom:10,transition:"all 0.2s" };
+
+  return (
+    <div style={{ position:"fixed",inset:0,zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.75)",backdropFilter:"blur(4px)",padding:16 }}
+      onClick={e=>e.target===e.currentTarget&&(reset(),onClose())}>
+      <div style={{ width:"100%",maxWidth:400,background:t.card,backdropFilter:"blur(24px)",border:`1px solid ${t.border}`,borderRadius:16,padding:"28px 24px",animation:"scaleIn 0.25s cubic-bezier(0.34,1.56,0.64,1) forwards" }}>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+          <div style={{ fontFamily:"'Orbitron',monospace",fontSize:13,fontWeight:700,color:t.secondary,letterSpacing:"0.1em" }}>{isSignUp?"CREATE ACCOUNT":"SIGN IN"}</div>
+          <button onClick={()=>{reset();onClose();}} style={{ background:"transparent",border:"none",color:t.accent,cursor:"pointer",fontSize:18,lineHeight:1,padding:4 }}>✕</button>
+        </div>
+
+        <div style={{ display:"flex",gap:6,marginBottom:20 }}>
+          {[["signin","SIGN IN"],["signup","CREATE ACCOUNT"]].map(([m,lbl])=>(
+            <button key={m} onClick={()=>setMode(m)} style={{ flex:1,padding:"9px 0",fontFamily:"'Orbitron',monospace",fontSize:8,letterSpacing:"0.05em",border:`1px solid ${mode===m?t.primary:t.border}`,borderRadius:8,cursor:"pointer",background:mode===m?`${t.primary}22`:"transparent",color:mode===m?t.primary:t.accent,transition:"all 0.2s" }}>{lbl}</button>
+          ))}
+        </div>
+
+        {isSignUp&&(<><FieldLabel t={t}>USERNAME</FieldLabel><input value={username} onChange={e=>setUsername(e.target.value)} placeholder="Choose a username..." style={inp}/></>)}
+        <FieldLabel t={t}>EMAIL</FieldLabel>
+        <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="Enter your email..." style={inp}/>
+        <FieldLabel t={t}>PASSWORD</FieldLabel>
+        <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder={isSignUp?"At least 6 characters...":"Enter your password..."}
+          style={{...inp,marginBottom:16}} onKeyDown={e=>e.key==="Enter"&&canSubmit&&(isSignUp?handleSignUp():handleSignIn())}/>
+
+        {error&&<div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:12,color:t.danger,marginBottom:12,padding:"8px 12px",background:`${t.danger}11`,border:`1px solid ${t.danger}33`,borderRadius:7 }}>{error}</div>}
+
+        <button onClick={isSignUp?handleSignUp:handleSignIn} disabled={!canSubmit||loading}
+          style={{ ...primaryBtn,background:canSubmit&&!loading?`linear-gradient(135deg,${t.primary},${t.secondary})`:`${t.primary}22`,cursor:canSubmit&&!loading?"pointer":"default",color:canSubmit&&!loading?t.bg:"#3a5060",boxShadow:canSubmit&&!loading?`0 0 16px ${t.primary}66`:"none" }}>
+          {loading?"...":(isSignUp?"CREATE ACCOUNT →":"SIGN IN →")}
+        </button>
+
+        <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:10 }}>
+          <div style={{ flex:1,height:1,background:t.border }}/><span style={{ fontFamily:"'Exo 2',sans-serif",fontSize:11,color:t.accent,opacity:0.6 }}>OR</span><div style={{ flex:1,height:1,background:t.border }}/>
+        </div>
+
+        <button onClick={handleGoogle}
+          style={{ width:"100%",padding:"11px 0",fontFamily:"'Orbitron',monospace",fontSize:10,letterSpacing:"0.1em",background:"transparent",border:`1px solid ${t.border}`,borderRadius:8,cursor:"pointer",color:t.accent,display:"flex",alignItems:"center",justifyContent:"center",gap:8,transition:"all 0.2s" }}
+          onMouseEnter={e=>{e.currentTarget.style.borderColor=t.primary;e.currentTarget.style.color=t.primary;}}
+          onMouseLeave={e=>{e.currentTarget.style.borderColor=t.border;e.currentTarget.style.color=t.accent;}}>
+          <span style={{ fontSize:15,fontWeight:700 }}>G</span>CONTINUE WITH GOOGLE
+        </button>
+
+        {isSignUp&&<div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:11,color:t.accent,textAlign:"center",marginTop:12,opacity:0.7 }}>Your current progress ({guestXp} XP) will be carried over.</div>}
+      </div>
+    </div>
+  );
+}
+
+// ── Multiplayer Row (locked placeholder) ──────────────────────────────────
+function MultiplayerRow({ isGuest, t }) {
+  const label = isGuest ? "Create an account to unlock" : "Coming soon";
+  const btnStyle = { flex:1,padding:"9px 0",fontFamily:"'Orbitron',monospace",fontSize:8.5,letterSpacing:"0.06em",border:`1px solid ${t.border}`,borderRadius:8,cursor:"default",background:"transparent",color:`${t.accent}55`,opacity:0.55 };
+  return (
+    <div style={{ marginBottom:16 }}>
+      <div style={{ display:"flex",gap:6 }}>
+        <button style={btnStyle} disabled>🔒 GUILD</button>
+        <button style={btnStyle} disabled>🔒 LEADERBOARD</button>
+      </div>
+      <div style={{ textAlign:"center",marginTop:5,fontFamily:"'Exo 2',sans-serif",fontSize:10,color:`${t.accent}55`,letterSpacing:"0.05em" }}>{label}</div>
+    </div>
+  );
+}
+
 export default function App() {
   const [screen,setScreen]=useState("loading");
   const [playerName,setPlayerName]=useState(()=>localStorage.getItem("nq_playerName")||"HERO");
@@ -773,6 +886,9 @@ export default function App() {
   const [tip]=useState(()=>TIPS[Math.floor(Math.random()*TIPS.length)]);
   const [clearConfirm,setClearConfirm]=useState(null);
   const [now,setNow]=useState(()=>Date.now());
+  const [authUser,setAuthUser]=useState(null);
+  const [profile,setProfile]=useState(null);
+  const [showAuthModal,setShowAuthModal]=useState(false);
   const inputRef=useRef();
   const prevXpRef=useRef(0);
   const play=useSound();
@@ -813,6 +929,38 @@ export default function App() {
     setMissed(prev=>[...records,...prev]);
     applyXp(-penalty); play("penalty");
   },[now,tasks,screen]);
+
+  // Listen for Supabase auth changes and sync profile/xp on login
+  useEffect(()=>{
+    const { data:{ subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        setAuthUser(session.user);
+        const { data: prof } = await supabase.from("profiles").select("*").eq("id",session.user.id).single();
+        if (prof) {
+          setProfile(prof);
+          setXp(prof.xp);
+        } else {
+          // First Google sign-in — create a default profile with current guest progress
+          const defaultUsername = (session.user.email?.split("@")[0] || "hero").toUpperCase();
+          const curLevel = Math.floor(xp / XP_PER_LEVEL) + 1;
+          await supabase.from("profiles").insert({ id:session.user.id, username:defaultUsername, email:session.user.email, xp, level:curLevel });
+          const { data: newProf } = await supabase.from("profiles").select("*").eq("id",session.user.id).single();
+          if (newProf) setProfile(newProf);
+        }
+      } else {
+        setAuthUser(null);
+        setProfile(null);
+      }
+    });
+    return () => subscription.unsubscribe();
+  },[]);
+
+  // Sync xp/level back to Supabase whenever it changes for logged-in users
+  useEffect(()=>{
+    if (!authUser) return;
+    const derived = Math.floor(xp / XP_PER_LEVEL) + 1;
+    supabase.from("profiles").update({ xp, level:derived }).eq("id",authUser.id);
+  },[xp, authUser]);
 
   const buildFromForm=()=>{
     const q={title:form.title.trim(),difficulty:form.difficulty,importance:form.importance,scheduleType:form.schedule,timerDeadline:null,timerSeconds:null,timerMissed:false,dueDate:null,repeat:"none",repeatEvery:Math.max(1,Math.round(Number(form.repeatEvery)||1))};
@@ -888,10 +1036,23 @@ export default function App() {
                   </div>
                 </div>
                 <XPBar xp={xp} t={t}/>
+                <div style={{ marginTop:10,display:"flex",justifyContent:"flex-end",alignItems:"center",gap:8 }}>
+                  {authUser ? (
+                    <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                      <span style={{ fontFamily:"'Orbitron',monospace",fontSize:9,color:t.accent,letterSpacing:"0.1em" }}>{profile?.username||authUser.email?.split("@")[0]?.toUpperCase()}</span>
+                      <button onClick={()=>supabase.auth.signOut()} style={{ padding:"5px 12px",fontFamily:"'Orbitron',monospace",fontSize:8,letterSpacing:"0.1em",background:"transparent",border:`1px solid ${t.border}`,borderRadius:6,cursor:"pointer",color:t.accent,transition:"all 0.2s" }}>SIGN OUT</button>
+                    </div>
+                  ) : (
+                    <button onClick={()=>setShowAuthModal(true)} style={{ padding:"6px 14px",fontFamily:"'Orbitron',monospace",fontSize:8,letterSpacing:"0.1em",background:`${t.primary}11`,border:`1px solid ${t.primary}44`,borderRadius:7,cursor:"pointer",color:t.primary,transition:"all 0.2s" }}>SIGN IN / CREATE ACCOUNT</button>
+                  )}
+                </div>
               </div>
 
               {/* Music Bar */}
               <MusicBar music={music} t={t}/>
+
+              {/* Multiplayer (locked placeholder) */}
+              <MultiplayerRow isGuest={!authUser} t={t}/>
 
               {/* Tip */}
               <div style={{ background:`${t.primary}0d`,border:`1px solid ${t.primary}22`,borderRadius:10,padding:"10px 16px",marginBottom:20,display:"flex",gap:10,alignItems:"center" }}>
@@ -920,6 +1081,7 @@ export default function App() {
           </div>
         </>
       )}
+      <AuthModal open={showAuthModal} onClose={()=>setShowAuthModal(false)} guestXp={xp} t={t}/>
     </>
   );
 }
