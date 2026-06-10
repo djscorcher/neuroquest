@@ -761,7 +761,6 @@ const BLANK_FORM={title:"",difficulty:"Medium",importance:"Medium",schedule:"non
 // ── Auth Modal ────────────────────────────────────────────────────────────
 function AuthModal({ open, onClose, guestXp, t }) {
   const [mode, setMode] = useState("signin");
-  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -769,16 +768,12 @@ function AuthModal({ open, onClose, guestXp, t }) {
 
   if (!open) return null;
 
-  const reset = () => { setUsername(""); setEmail(""); setPassword(""); setError(""); setLoading(false); };
+  const reset = () => { setEmail(""); setPassword(""); setError(""); setLoading(false); };
 
   const handleSignUp = async () => {
-    if (!username.trim() || !email.trim() || password.length < 6) return;
+    if (!email.trim() || password.length < 6) return;
     setLoading(true); setError("");
-    const guestLevel = Math.floor(guestXp / XP_PER_LEVEL) + 1;
-    const { error: authErr } = await supabase.auth.signUp({
-      email, password,
-      options: { data: { username: username.trim().toUpperCase(), xp: guestXp, level: guestLevel } },
-    });
+    const { error: authErr } = await supabase.auth.signUp({ email, password });
     if (authErr) { setError(authErr.message); setLoading(false); return; }
     setLoading(false); reset(); onClose();
   };
@@ -800,7 +795,7 @@ function AuthModal({ open, onClose, guestXp, t }) {
 
   const isSignUp = mode === "signup";
   const canSubmit = isSignUp
-    ? username.trim().length >= 2 && email.trim() && password.length >= 6
+    ? email.trim() && password.length >= 6
     : email.trim() && password.length >= 1;
 
   const inp = { width:"100%",background:`${t.primary}11`,border:`1px solid ${t.primary}44`,borderRadius:8,padding:"11px 14px",color:"#e0f0ff",fontFamily:"'Exo 2',sans-serif",fontSize:14,outline:"none",marginBottom:12 };
@@ -821,7 +816,6 @@ function AuthModal({ open, onClose, guestXp, t }) {
           ))}
         </div>
 
-        {isSignUp&&(<><FieldLabel t={t}>USERNAME</FieldLabel><input value={username} onChange={e=>setUsername(e.target.value)} placeholder="Choose a username..." style={inp}/></>)}
         <FieldLabel t={t}>EMAIL</FieldLabel>
         <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="Enter your email..." style={inp}/>
         <FieldLabel t={t}>PASSWORD</FieldLabel>
