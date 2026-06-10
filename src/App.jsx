@@ -735,7 +735,8 @@ function MissedCard({ task, onDelete, t }) {
 }
 
 // ── Stats Tab ─────────────────────────────────────────────────────────────
-function StatsTab({ xp, level, tasks, completed, missed, t }) {
+function StatsTab({ xp, level, tasks, completed, missed, t, onReset, isLoggedIn }) {
+  const [resetConfirm, setResetConfirm] = useState(false);
   const easyCt=completed.filter(x=>x.difficulty==="Easy").length;
   const medCt=completed.filter(x=>x.difficulty==="Medium").length;
   const hardCt=completed.filter(x=>x.difficulty==="Hard").length;
@@ -744,13 +745,30 @@ function StatsTab({ xp, level, tasks, completed, missed, t }) {
   const topDiff=completed.length?(easyCt>=medCt&&easyCt>=hardCt?"Easy":medCt>=hardCt?"Medium":"Hard"):"—";
   const stats=[{label:"TOTAL XP",value:xp},{label:"LEVEL",value:level},{label:"RANK",value:getRank(level)},{label:"COMPLETED",value:completed.length},{label:"PENDING",value:tasks.length},{label:"MISSED",value:missed.length},{label:"EARLY",value:earlyCt},{label:"ON TIME",value:onTimeCt},{label:"TOP DIFF",value:topDiff},{label:"EASY",value:easyCt},{label:"MEDIUM",value:medCt},{label:"HARD",value:hardCt}];
   return (
-    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10 }}>
-      {stats.map(s=>(
-        <div key={s.label} style={{ background:t.card,border:`1px solid ${t.border}`,borderRadius:10,padding:"14px 12px",textAlign:"center",backdropFilter:"blur(8px)" }}>
-          <div style={{ fontFamily:"'Orbitron',monospace",fontSize:9,color:t.primary,letterSpacing:"0.1em",marginBottom:6 }}>{s.label}</div>
-          <div style={{ fontFamily:"'Orbitron',monospace",fontSize:16,fontWeight:700,color:"#e0f4ff" }}>{s.value}</div>
-        </div>
-      ))}
+    <div>
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10 }}>
+        {stats.map(s=>(
+          <div key={s.label} style={{ background:t.card,border:`1px solid ${t.border}`,borderRadius:10,padding:"14px 12px",textAlign:"center",backdropFilter:"blur(8px)" }}>
+            <div style={{ fontFamily:"'Orbitron',monospace",fontSize:9,color:t.primary,letterSpacing:"0.1em",marginBottom:6 }}>{s.label}</div>
+            <div style={{ fontFamily:"'Orbitron',monospace",fontSize:16,fontWeight:700,color:"#e0f4ff" }}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop:20,textAlign:"center" }}>
+        {resetConfirm ? (
+          <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:10 }}>
+            <span style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:t.accent }}>
+              {isLoggedIn ? "Wipe all XP, quests, and progress? Your account stays." : "Clear all local progress and start fresh?"}
+            </span>
+            <div style={{ display:"flex",gap:10 }}>
+              <button onClick={onReset} style={{ padding:"7px 16px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"rgba(255,80,80,0.2)",border:"1px solid #ff6060",borderRadius:7,color:"#ff6060",cursor:"pointer" }}>YES, RESET</button>
+              <button onClick={()=>setResetConfirm(false)} style={{ padding:"7px 16px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"transparent",border:`1px solid ${t.border}`,borderRadius:7,color:t.accent,cursor:"pointer" }}>CANCEL</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={()=>setResetConfirm(true)} style={{ padding:"8px 20px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"transparent",border:"1px solid rgba(255,80,80,0.3)",borderRadius:8,color:"#ff6060",cursor:"pointer",letterSpacing:"0.1em" }}>NEW RUN</button>
+        )}
+      </div>
     </div>
   );
 }
@@ -1047,6 +1065,17 @@ export default function App() {
 
   const moveTask=(id,dir)=>setTasks(prev=>{const i=prev.findIndex(x=>x.id===id);if(i<0)return prev;const ni=i+dir;if(ni<0||ni>=prev.length)return prev;const arr=[...prev];[arr[i],arr[ni]]=[arr[ni],arr[i]];return arr;});
 
+  const resetProgress = async () => {
+    ['nq_playerName','nq_themeKey','nq_xp','nq_tasks','nq_completed','nq_missed','nq_onboarded'].forEach(k=>localStorage.removeItem(k));
+    if (authUser) {
+      await supabase.from('tasks').delete().eq('user_id', authUser.id);
+      await supabase.from('profiles').update({ player_name:'HERO', xp:0, theme_key:'techboy' }).eq('id', authUser.id);
+    }
+    setPlayerName('HERO'); setThemeKey('techboy'); setXp(0);
+    setTasks([]); setCompleted([]); setMissed([]);
+    setScreen('name');
+  };
+
   const TABS=[["active",`QUESTS (${tasks.length})`],["missed",`MISSED (${missed.length})`],["done",`DONE (${completed.length})`],["stats","STATS"]];
 
   return (
@@ -1137,7 +1166,7 @@ export default function App() {
 
                 {tab==="done"&&(completed.length===0?<div style={{ textAlign:"center",padding:"48px 0" }}><div style={{ fontFamily:"'Orbitron',monospace",fontSize:12,color:`${t.primary}44`,letterSpacing:"0.15em",marginBottom:8 }}>NO COMPLETED QUESTS YET</div><div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:`${t.accent}66` }}>Complete your first quest to see it here.</div></div>:<>{completed.map((task,i)=><CompletedCard key={`${task.id}-${i}`} task={task} t={t}/>)}<div style={{ marginTop:16,textAlign:"center" }}>{clearConfirm==="done"?<div style={{ display:"flex",gap:10,justifyContent:"center" }}><span style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:t.accent,alignSelf:"center" }}>Clear all completed?</span><button onClick={()=>{setCompleted([]);setClearConfirm(null);}} style={{ padding:"7px 16px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"rgba(255,80,80,0.2)",border:"1px solid #ff6060",borderRadius:7,color:"#ff6060",cursor:"pointer" }}>YES</button><button onClick={()=>setClearConfirm(null)} style={{ padding:"7px 16px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"transparent",border:`1px solid ${t.border}`,borderRadius:7,color:t.accent,cursor:"pointer" }}>NO</button></div>:<button onClick={()=>setClearConfirm("done")} style={{ padding:"8px 20px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"transparent",border:"1px solid rgba(255,80,80,0.3)",borderRadius:8,color:"#ff6060",cursor:"pointer",letterSpacing:"0.1em" }}>CLEAR LOG</button>}</div></>)}
 
-                {tab==="stats"&&<StatsTab xp={xp} level={level} tasks={tasks} completed={completed} missed={missed} t={t}/>}
+                {tab==="stats"&&<StatsTab xp={xp} level={level} tasks={tasks} completed={completed} missed={missed} t={t} onReset={resetProgress} isLoggedIn={!!authUser}/>}
               </div>
             </div>
           </div>
