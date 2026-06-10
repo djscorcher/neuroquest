@@ -2,6 +2,8 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 import { fetchUserData, syncProfile, syncList, syncAllLists, insertActivityEvent } from "./supabaseSync";
 import FriendsModal from "./FriendsModal";
+import { NotifySettings } from "./components/NotifySettings.jsx";
+import { InstallCard } from "./components/InstallCard.jsx";
 import BossBattle from "./components/BossBattle.jsx";
 import { StreakCard, StreakToast } from "./components/StreakCard.jsx";
 import { TrialPanel, TrialToast } from "./components/TrialPanel.jsx";
@@ -983,6 +985,11 @@ export default function App() {
   const [streakToasts,setStreakToasts]=useState([]);
   const [trialState,setTrialState]=useState(()=>getTrialState());
   const [trialToasts,setTrialToasts]=useState([]);
+  const FRESH_NOTIFY_PREFS=()=>({streakAtRisk:true,bossExpiry:true,dailyReminder:false,dailyReminderTime:'09:00',tz:Intl.DateTimeFormat().resolvedOptions().timeZone});
+  const [notifyPrefs,setNotifyPrefs]=useState(()=>{try{const s=localStorage.getItem('nq_notify_prefs');return s?{...FRESH_NOTIFY_PREFS(),...JSON.parse(s)}:FRESH_NOTIFY_PREFS();}catch{return FRESH_NOTIFY_PREFS();}});
+  const [deferredPrompt,setDeferredPrompt]=useState(null);
+  const [showInstallCard,setShowInstallCard]=useState(false);
+  const [isOnline,setIsOnline]=useState(()=>navigator.onLine);
   const inputRef=useRef();
   const prevXpRef=useRef(0);
   const syncTimers=useRef({});
@@ -1005,6 +1012,7 @@ export default function App() {
   useEffect(()=>{localStorage.setItem("nq_missed",JSON.stringify(missed));},[missed]);
   useEffect(()=>{localStorage.setItem("nq_gems",JSON.stringify(gems));},[gems]);
   useEffect(()=>{localStorage.setItem("nq_titles",JSON.stringify(titles));},[titles]);
+  useEffect(()=>{localStorage.setItem("nq_notify_prefs",JSON.stringify(notifyPrefs));},[notifyPrefs]);
   useEffect(()=>{ if(screen==="game") music.startMusic(); },[screen]);
 
   // Nudge queue — show one at a time, mark seen, then advance
@@ -1027,6 +1035,34 @@ export default function App() {
     const t=setTimeout(()=>setTrialToasts(prev=>prev.slice(1)),4500);
     return()=>clearTimeout(t);
   },[trialToasts]);
+
+  // Capture install prompt + track online state
+  useEffect(()=>{
+    const onPrompt=e=>{e.preventDefault();setDeferredPrompt(e);};
+    const onOnline=()=>setIsOnline(true);
+    const onOffline=()=>setIsOnline(false);
+    window.addEventListener('beforeinstallprompt',onPrompt);
+    window.addEventListener('online',onOnline);
+    window.addEventListener('offline',onOffline);
+    return()=>{
+      window.removeEventListener('beforeinstallprompt',onPrompt);
+      window.removeEventListener('online',onOnline);
+      window.removeEventListener('offline',onOffline);
+    };
+  },[]);
+
+  // Show install card after engagement trigger (first boss kill OR streak ≥ 3), dismissal persists 14 days
+  useEffect(()=>{
+    if(showInstallCard)return;
+    const dismissed=localStorage.getItem('nq_install_dismissed');
+    if(dismissed&&Date.now()-Number(dismissed)<14*86400*1000)return;
+    const bossDead=bossResolutions.some(r=>r.outcome==='defeated');
+    const streakOk=(streakState?.currentStreak??0)>=3;
+    if(bossDead||streakOk)setShowInstallCard(true);
+  },[bossResolutions,streakState]);
+
+  const handleNotifyPrefsChange=newPrefs=>{setNotifyPrefs({...newPrefs,tz:Intl.DateTimeFormat().resolvedOptions().timeZone});};
+  const handleInstallDismiss=()=>{localStorage.setItem('nq_install_dismissed',String(Date.now()));setShowInstallCard(false);setDeferredPrompt(null);};
 
   useEffect(()=>{
     const prevLv=Math.floor(prevXpRef.current/XP_PER_LEVEL)+1;
@@ -1272,7 +1308,7 @@ export default function App() {
     lastLocalChangeRef.current = Date.now();
     clearTimeout(syncTimers.current.profile);
     const streak=computeStreak(completed);
-    syncTimers.current.profile = setTimeout(()=>syncProfile(authUser.id,{playerName,xp,themeKey,streak,completedCount:completed.length,gems,titles,bossState:localStorage.getItem('nq_boss_v1'),streakState:localStorage.getItem('nq_streak_v1'),trialState:localStorage.getItem('nq_trial_v1')}),150);
+    syncTimers.current.profile = setTimeout(()=>syncProfile(authUser.id,{playerName,xp,themeKey,streak,completedCount:completed.length,gems,titles,bossState:localStorage.getItem('nq_boss_v1'),streakState:localStorage.getItem('nq_streak_v1'),trialState:localStorage.getItem('nq_trial_v1'),notifyPrefs,tz:Intl.DateTimeFormat().resolvedOptions().timeZone}),150);
   },[playerName,xp,themeKey,completed,authUser]);
   useEffect(()=>{
     if (!authUser) return;
@@ -1382,6 +1418,7 @@ export default function App() {
           <XPPopup popups={popups} t={t}/>
           <StreakToast toasts={streakToasts} t={t}/>
           <TrialToast toasts={trialToasts} t={t}/>
+          {!isOnline&&<div style={{ position:"fixed",top:0,left:0,right:0,zIndex:9999,background:"rgba(255,180,50,0.12)",borderBottom:"1px solid rgba(255,180,50,0.3)",textAlign:"center",padding:"6px",fontFamily:"'Orbitron',monospace",fontSize:9,color:"#ffb454",letterSpacing:"0.15em" }}>OFFLINE — changes sync on reconnect</div>}
           <div style={{ minHeight:"100vh",background:t.bgGrad,fontFamily:"'Exo 2',sans-serif",position:"relative",overflow:"hidden" }}>
             <div style={{ position:"fixed",inset:0,pointerEvents:"none",zIndex:0,backgroundImage:`linear-gradient(${t.grid} 1px,transparent 1px),linear-gradient(90deg,${t.grid} 1px,transparent 1px)`,backgroundSize:"60px 60px",animation:"gridMove 4s linear infinite" }}/>
             <div style={{ position:"fixed",top:-120,left:-80,width:400,height:400,borderRadius:"50%",background:`radial-gradient(circle,${t.orb1} 0%,transparent 70%)`,pointerEvents:"none",zIndex:0 }}/>
@@ -1442,6 +1479,7 @@ export default function App() {
                 <span style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:t.accent }}>{tip}</span>
               </div>
 
+              {showInstallCard&&<InstallCard deferredPrompt={deferredPrompt} onDismiss={handleInstallDismiss} t={t}/>}
               <QuestForm form={form} setForm={setForm} onSubmit={submitForm} onCancel={resetForm} editing={!!editingId} t={t} inputRef={inputRef}/>
 
               <div style={{ display:"flex",gap:6,marginBottom:16 }}>
@@ -1457,7 +1495,7 @@ export default function App() {
 
                 {tab==="done"&&(completed.length===0?<div style={{ textAlign:"center",padding:"48px 0" }}><div style={{ fontFamily:"'Orbitron',monospace",fontSize:12,color:`${t.primary}44`,letterSpacing:"0.15em",marginBottom:8 }}>NO COMPLETED QUESTS YET</div><div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:`${t.accent}66` }}>Complete your first quest to see it here.</div></div>:<>{completed.map((task,i)=><CompletedCard key={`${task.id}-${i}`} task={task} t={t}/>)}<div style={{ marginTop:16,textAlign:"center" }}>{clearConfirm==="done"?<div style={{ display:"flex",gap:10,justifyContent:"center" }}><span style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:t.accent,alignSelf:"center" }}>Clear all completed?</span><button onClick={()=>{setCompleted([]);setClearConfirm(null);}} style={{ padding:"7px 16px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"rgba(255,80,80,0.2)",border:"1px solid #ff6060",borderRadius:7,color:"#ff6060",cursor:"pointer" }}>YES</button><button onClick={()=>setClearConfirm(null)} style={{ padding:"7px 16px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"transparent",border:`1px solid ${t.border}`,borderRadius:7,color:t.accent,cursor:"pointer" }}>NO</button></div>:<button onClick={()=>setClearConfirm("done")} style={{ padding:"8px 20px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"transparent",border:"1px solid rgba(255,80,80,0.3)",borderRadius:8,color:"#ff6060",cursor:"pointer",letterSpacing:"0.1em" }}>CLEAR LOG</button>}</div></>)}
 
-                {tab==="stats"&&<StatsTab xp={xp} level={level} tasks={tasks} completed={completed} missed={missed} t={t} onReset={resetProgress} isLoggedIn={!!authUser}/>}
+                {tab==="stats"&&<><StatsTab xp={xp} level={level} tasks={tasks} completed={completed} missed={missed} t={t} onReset={resetProgress} isLoggedIn={!!authUser}/><NotifySettings prefs={notifyPrefs} onPrefsChange={handleNotifyPrefsChange} isLoggedIn={!!authUser} authUser={authUser} t={t}/></>}
               </div>
             </div>
           </div>
