@@ -970,6 +970,32 @@ export default function App() {
     applyXp(-penalty); play("penalty");
   },[now,tasks,screen]);
 
+  // Pull the canonical Supabase state and overwrite local — called on login and on tab focus
+  const refreshFromCloud = useCallback(async () => {
+    if (!authUser) return;
+    const data = await fetchUserData(authUser.id);
+    if (!data?.profile) return; // offline or no profile yet
+    setProfile(data.profile);
+    setPlayerName(data.profile.player_name);
+    setXp(data.profile.xp);
+    setThemeKey(data.profile.theme_key);
+    setTasks(data.tasks);
+    setCompleted(data.completed);
+    setMissed(data.missed);
+  }, [authUser]);
+
+  // Re-sync whenever the tab/window regains focus so diverged devices converge
+  useEffect(()=>{
+    const onFocus   = () => refreshFromCloud();
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshFromCloud(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refreshFromCloud]);
+
   // Auth state listener — hydrates from Supabase on login, migrates localStorage on first sync
   useEffect(()=>{
     const { data:{ subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
