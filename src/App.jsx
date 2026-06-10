@@ -1038,9 +1038,11 @@ export default function App() {
 
   // Capture install prompt + track online state
   useEffect(()=>{
-    const onPrompt=e=>{e.preventDefault();setDeferredPrompt(e);};
+    const onPrompt=e=>{e.preventDefault();window.__installPrompt=e;setDeferredPrompt(e);};
     const onOnline=()=>setIsOnline(true);
     const onOffline=()=>setIsOnline(false);
+    // Pick up any prompt captured before React mounted (see main.jsx)
+    if(window.__installPrompt)setDeferredPrompt(window.__installPrompt);
     window.addEventListener('beforeinstallprompt',onPrompt);
     window.addEventListener('online',onOnline);
     window.addEventListener('offline',onOffline);
