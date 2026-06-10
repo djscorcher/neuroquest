@@ -1052,6 +1052,7 @@ export default function App() {
         // hasn't landed yet, INSERT directly. syncProfile uses UPDATE and won't create a new row.
         const { error: insErr } = await supabase.from('profiles').insert({
           id: uid, player_name: ls.playerName, xp: ls.xp, theme_key: ls.themeKey,
+          friend_code: uid.replace(/-/g, '').substring(0, 8).toUpperCase(),
         });
         if (insErr) console.error('[auth] profile insert failed:', insErr.message);
         await syncAllLists(uid, ls.tasks, ls.completed, ls.missed);
