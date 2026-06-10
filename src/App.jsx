@@ -3,7 +3,17 @@ import { supabase } from "./supabaseClient";
 import { fetchUserData, syncProfile, syncList, syncAllLists, insertActivityEvent } from "./supabaseSync";
 import FriendsModal from "./FriendsModal";
 import BossBattle from "./components/BossBattle.jsx";
+import { StreakCard, StreakToast } from "./components/StreakCard.jsx";
 import { applyBossDamage, applyBossHeal, consumeResolutions, subscribeBoss } from "./lib/bossEngine.js";
+import {
+  checkIn as streakCheckIn,
+  recordTaskCompletion as streakTaskDone,
+  recordLevel as streakRecordLevel,
+  recordBossKill as streakBossKill,
+  consumeRewards as streakConsumeRewards,
+  getStreakState,
+  buyFreeze as streakBuyFreeze,
+} from "./lib/streakEngine.js";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const DIFFICULTY_BASE       = { Easy: 10, Medium: 25, Hard: 50 };
@@ -958,6 +968,8 @@ export default function App() {
   const [gems,setGems]=useState(()=>{try{return JSON.parse(localStorage.getItem("nq_gems"))||0;}catch{return 0;}});
   const [titles,setTitles]=useState(()=>{try{return JSON.parse(localStorage.getItem("nq_titles"))||[];}catch{return [];}});
   const [bossResolutions,setBossResolutions]=useState([]);
+  const [streakState,setStreakState]=useState(()=>getStreakState());
+  const [streakToasts,setStreakToasts]=useState([]);
   const inputRef=useRef();
   const prevXpRef=useRef(0);
   const syncTimers=useRef({});
@@ -993,8 +1005,21 @@ export default function App() {
     return()=>clearTimeout(timer);
   },[nudgeQueue,activeNudge,play]);
   useEffect(()=>{
+    if(!streakToasts.length)return;
+    const t=setTimeout(()=>setStreakToasts(prev=>prev.slice(1)),3800);
+    return()=>clearTimeout(t);
+  },[streakToasts]);
+
+  useEffect(()=>{
     const prevLv=Math.floor(prevXpRef.current/XP_PER_LEVEL)+1;
-    if(level>prevLv){setShowLevelUp(true);play("levelup");setTimeout(()=>setShowLevelUp(false),1800);}
+    if(level>prevLv){
+      setShowLevelUp(true);play("levelup");setTimeout(()=>setShowLevelUp(false),1800);
+      streakRecordLevel(level);
+      const sr=streakConsumeRewards();
+      sr.forEach(r=>{if(r.xp>0)applyXp(r.xp);if(r.gems>0)setGems(g=>g+r.gems);if(r.title)setTitles(ts=>[...ts,r.title]);});
+      if(sr.length)setStreakToasts(prev=>[...prev,...sr]);
+      setStreakState(getStreakState());
+    }
     else if(level<prevLv){setShowDerank(true);play("derank");setTimeout(()=>setShowDerank(false),1800);}
     prevXpRef.current=xp;
   },[xp]);
@@ -1037,8 +1062,16 @@ export default function App() {
 
   // Re-sync whenever the tab/window regains focus so diverged devices converge
   useEffect(()=>{
-    const onFocus   = () => refreshFromCloud();
-    const onVisible = () => { if (document.visibilityState === 'visible') refreshFromCloud(); };
+    const handleFocus=()=>{
+      streakCheckIn(Date.now());
+      const sr=streakConsumeRewards();
+      sr.forEach(r=>{if(r.xp>0)applyXp(r.xp);if(r.gems>0)setGems(g=>g+r.gems);if(r.title)setTitles(ts=>[...ts,r.title]);});
+      if(sr.length)setStreakToasts(prev=>[...prev,...sr]);
+      setStreakState(getStreakState());
+      refreshFromCloud();
+    };
+    const onFocus   = () => handleFocus();
+    const onVisible = () => { if (document.visibilityState === 'visible') handleFocus(); };
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisible);
     return () => {
@@ -1125,15 +1158,37 @@ export default function App() {
     })();
   },[authUser?.id]);
 
-  // On mount: consume offline boss resolutions → credit gems/titles → surface for toast
+  // On mount: streak check-in + boss resolutions → credit gems/titles → surface for toast
   useEffect(()=>{
+    // Integration point 1: check-in + consume streak rewards
+    streakCheckIn(Date.now());
+    const sr=streakConsumeRewards();
+    sr.forEach(r=>{if(r.xp>0)applyXp(r.xp);if(r.gems>0)setGems(g=>g+r.gems);if(r.title)setTitles(ts=>[...ts,r.title]);});
+    if(sr.length)setStreakToasts(prev=>[...prev,...sr]);
+    setStreakState(getStreakState());
+
+    // Boss resolutions (integration point 4: fire streakBossKill on defeated)
     const offline=consumeResolutions();
-    offline.forEach(r=>{setGems(p=>p+r.gems);if(r.title)setTitles(p=>[...p,r.title]);});
+    offline.forEach(r=>{
+      setGems(p=>p+r.gems);if(r.title)setTitles(p=>[...p,r.title]);
+      if(r.outcome==='defeated'){
+        streakBossKill();
+        const bsr=streakConsumeRewards();
+        bsr.forEach(br=>{if(br.xp>0)applyXp(br.xp);if(br.gems>0)setGems(g=>g+br.gems);if(br.title)setTitles(ts=>[...ts,br.title]);});
+        if(bsr.length)setStreakToasts(prev=>[...prev,...bsr]);
+      }
+    });
     if(offline.length)setBossResolutions(offline);
     const unsub=subscribeBoss(e=>{
       if(e.type!=='boss:resolved')return;
       setGems(p=>p+e.gems);
       if(e.title)setTitles(p=>[...p,e.title]);
+      if(e.outcome==='defeated'){
+        streakBossKill();
+        const bsr=streakConsumeRewards();
+        bsr.forEach(br=>{if(br.xp>0)applyXp(br.xp);if(br.gems>0)setGems(g=>g+br.gems);if(br.title)setTitles(ts=>[...ts,br.title]);});
+        if(bsr.length)setStreakToasts(prev=>[...prev,...bsr]);
+      }
       setBossResolutions(prev=>[...prev,e]);
     });
     return unsub;
@@ -1184,7 +1239,7 @@ export default function App() {
     lastLocalChangeRef.current = Date.now();
     clearTimeout(syncTimers.current.profile);
     const streak=computeStreak(completed);
-    syncTimers.current.profile = setTimeout(()=>syncProfile(authUser.id,{playerName,xp,themeKey,streak,completedCount:completed.length,gems,titles,bossState:localStorage.getItem('nq_boss_v1')}),150);
+    syncTimers.current.profile = setTimeout(()=>syncProfile(authUser.id,{playerName,xp,themeKey,streak,completedCount:completed.length,gems,titles,bossState:localStorage.getItem('nq_boss_v1'),streakState:localStorage.getItem('nq_streak_v1')}),150);
   },[playerName,xp,themeKey,completed,authUser]);
   useEffect(()=>{
     if (!authUser) return;
@@ -1239,8 +1294,15 @@ export default function App() {
   play("complete");applyXp(total);
   if(authUser) insertActivityEvent(authUser.id,total);
   applyBossDamage(total,{taskId:String(task.id),importance:task.importance,completedAt:Date.now(),dueAt:task.dueDate??null,onTime:timing==="early"||timing==="ontime"},Date.now());
+  // Integration point 2: streak task completion
+  streakTaskDone(Date.now());
+  const sr=streakConsumeRewards();
+  sr.forEach(r=>{if(r.xp>0)applyXp(r.xp);if(r.gems>0)setGems(g=>g+r.gems);if(r.title)setTitles(ts=>[...ts,r.title]);});
+  if(sr.length)setStreakToasts(prev=>[...prev,...sr]);
+  setStreakState(getStreakState());
   };
   const deleteTask=id=>{setTasks(prev=>prev.filter(x=>x.id!==id));if(editingId===id)resetForm();play("delete");};
+  const handleBuyFreeze=()=>{const res=streakBuyFreeze();if(res.ok){setGems(g=>Math.max(0,g-res.cost));setStreakState(getStreakState());};};
   const deleteMissed=id=>{setMissed(prev=>prev.filter(x=>x.id!==id));play("delete");};
   const handleDeleteAccount = async () => {
     setDeleteError("");
@@ -1279,6 +1341,7 @@ export default function App() {
           <DerankFlash show={showDerank} level={level} t={t}/>
           <NudgeFlash nudge={activeNudge} t={t}/>
           <XPPopup popups={popups} t={t}/>
+          <StreakToast toasts={streakToasts} t={t}/>
           <div style={{ minHeight:"100vh",background:t.bgGrad,fontFamily:"'Exo 2',sans-serif",position:"relative",overflow:"hidden" }}>
             <div style={{ position:"fixed",inset:0,pointerEvents:"none",zIndex:0,backgroundImage:`linear-gradient(${t.grid} 1px,transparent 1px),linear-gradient(90deg,${t.grid} 1px,transparent 1px)`,backgroundSize:"60px 60px",animation:"gridMove 4s linear infinite" }}/>
             <div style={{ position:"fixed",top:-120,left:-80,width:400,height:400,borderRadius:"50%",background:`radial-gradient(circle,${t.orb1} 0%,transparent 70%)`,pointerEvents:"none",zIndex:0 }}/>
@@ -1348,7 +1411,7 @@ export default function App() {
               </div>
 
               <div style={{ animation:"slideIn 0.25s ease" }}>
-                {tab==="active"&&(<><BossBattle t={t} pendingResolutions={bossResolutions}/>{tasks.length===0?<div style={{ textAlign:"center",padding:"48px 0" }}><div style={{ fontFamily:"'Orbitron',monospace",fontSize:12,color:`${t.primary}44`,letterSpacing:"0.15em",marginBottom:8 }}>NO ACTIVE QUESTS</div><div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:`${t.accent}66` }}>Add your first quest above to get started!</div></div>:tasks.map((task,i)=><QuestCard key={task.id} task={task} now={now} t={t} onComplete={completeTask} onDelete={deleteTask} onEdit={startEdit} onMove={moveTask} isFirst={i===0} isLast={i===tasks.length-1}/>)}</>)}
+                {tab==="active"&&(<><BossBattle t={t} pendingResolutions={bossResolutions}/><StreakCard streakState={streakState} gems={gems} onBuyFreeze={handleBuyFreeze} t={t}/>{tasks.length===0?<div style={{ textAlign:"center",padding:"48px 0" }}><div style={{ fontFamily:"'Orbitron',monospace",fontSize:12,color:`${t.primary}44`,letterSpacing:"0.15em",marginBottom:8 }}>NO ACTIVE QUESTS</div><div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:`${t.accent}66` }}>Add your first quest above to get started!</div></div>:tasks.map((task,i)=><QuestCard key={task.id} task={task} now={now} t={t} onComplete={completeTask} onDelete={deleteTask} onEdit={startEdit} onMove={moveTask} isFirst={i===0} isLast={i===tasks.length-1}/>)}</>)}
 
                 {tab==="missed"&&(missed.length===0?<div style={{ textAlign:"center",padding:"48px 0" }}><div style={{ fontFamily:"'Orbitron',monospace",fontSize:12,color:`${t.primary}44`,letterSpacing:"0.15em",marginBottom:8 }}>NOTHING MISSED</div><div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:`${t.accent}66` }}>Beat your timers and deadlines to keep this empty.</div></div>:<>{missed.map((task,i)=><MissedCard key={`${task.id}-${i}`} task={task} onDelete={deleteMissed} t={t}/>)}<div style={{ marginTop:16,textAlign:"center" }}>{clearConfirm==="missed"?<div style={{ display:"flex",gap:10,justifyContent:"center" }}><span style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:t.accent,alignSelf:"center" }}>Clear missed log?</span><button onClick={()=>{setMissed([]);setClearConfirm(null);}} style={{ padding:"7px 16px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"rgba(255,80,80,0.2)",border:"1px solid #ff6060",borderRadius:7,color:"#ff6060",cursor:"pointer" }}>YES</button><button onClick={()=>setClearConfirm(null)} style={{ padding:"7px 16px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"transparent",border:`1px solid ${t.border}`,borderRadius:7,color:t.accent,cursor:"pointer" }}>NO</button></div>:<button onClick={()=>setClearConfirm("missed")} style={{ padding:"8px 20px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"transparent",border:"1px solid rgba(255,80,80,0.3)",borderRadius:8,color:"#ff6060",cursor:"pointer",letterSpacing:"0.1em" }}>CLEAR LOG</button>}</div></>)}
 

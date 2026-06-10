@@ -10,6 +10,7 @@ import {
   resolveAndRespawn,
   _resetForTesting,
 } from './bossEngine.js';
+import { gameDate } from './gameDay.js';
 
 // Fixed timestamps for deterministic tests
 const NOW   = 1_700_000_000_000; // arbitrary epoch ms
@@ -54,7 +55,7 @@ test('damage reduces HP to integer, clamps at 0', () => {
   const meta  = { taskId: 'task1', importance: 'Medium', onTime: false };
 
   // Ensure no first-strike (set firstStrikeDate to today)
-  const stateNoFS = { ...state, firstStrikeDate: getLocalDateStr(NOW) };
+  const stateNoFS = { ...state, firstStrikeDate: gameDate(NOW) };
 
   const after = applyDamageToState(stateNoFS, 30, meta, NOW);
   assert.equal(after.boss.currentHp, state.boss.maxHp - 30);
@@ -71,7 +72,7 @@ test('damage reduces HP to integer, clamps at 0', () => {
 // ── 3. Kill ──────────────────────────────────────────────────────────────────
 test('kill: correct resolution queued, ledger cleared, next boss spawned', () => {
   const hp    = 50;
-  const state = withBoss({ maxHp: hp, currentHp: hp }, { firstStrikeDate: getLocalDateStr(NOW) });
+  const state = withBoss({ maxHp: hp, currentHp: hp }, { firstStrikeDate: gameDate(NOW) });
   const meta  = { taskId: 'taskKill', importance: 'Medium', onTime: false };
   // Use a modifier that gives 1× (punctual + onTime=false)
   const s     = { ...state, boss: { ...state.boss, modifierId: 'punctual' } };
@@ -100,7 +101,7 @@ test('kill at minor tier: gems proportional, NO title', () => {
   const hp    = 50;
   const state = {
     ...withBoss({ maxHp: hp, currentHp: hp, tier: 'minor', modifierId: 'punctual' }),
-    firstStrikeDate: getLocalDateStr(NOW),
+    firstStrikeDate: gameDate(NOW),
   };
   const meta  = { taskId: 't1', importance: 'Medium', onTime: false };
   const after = applyDamageToState(state, hp, meta, NOW);
@@ -150,7 +151,7 @@ test('multi-cycle offline gap: exactly ONE resolution, fresh boss from now', () 
 
 // ── 6. First Strike ──────────────────────────────────────────────────────────
 test('first strike: 2× on first task of day, 1× on second, resets next day', () => {
-  const yesterday = getLocalDateStr(NOW - 86_400_000);
+  const yesterday = gameDate(NOW - 86_400_000);
   // Boss with 1000 HP so it won't die
   const state = withBoss({ maxHp: 1000, currentHp: 1000, modifierId: 'punctual' }, { firstStrikeDate: yesterday });
 
@@ -159,7 +160,7 @@ test('first strike: 2× on first task of day, 1× on second, resets next day', (
 
   // First task of day: 2× → damage = 60
   assert.equal(after1.boss.currentHp, 1000 - 30 * CONFIG.FIRST_STRIKE_MULT);
-  assert.equal(after1.firstStrikeDate, getLocalDateStr(NOW));
+  assert.equal(after1.firstStrikeDate, gameDate(NOW));
 
   // Second task same day: 1× → damage = 30
   const meta2 = { taskId: 't2', importance: 'Medium', onTime: false };
@@ -176,7 +177,7 @@ test('first strike: 2× on first task of day, 1× on second, resets next day', (
 
 // ── 7. Modifier multipliers (no first strike) ────────────────────────────────
 test('weak_high: 2× for High, 1× for Medium', () => {
-  const today = getLocalDateStr(NOW);
+  const today = gameDate(NOW);
   const base  = { ...withBoss({ maxHp: 2000, currentHp: 2000, modifierId: 'weak_high' }), firstStrikeDate: today };
 
   const highMeta   = { taskId: 'h1', importance: 'High',   onTime: false };
@@ -189,7 +190,7 @@ test('weak_high: 2× for High, 1× for Medium', () => {
 });
 
 test('weak_critical: 2.5× for Critical, 1× for High', () => {
-  const today = getLocalDateStr(NOW);
+  const today = gameDate(NOW);
   const base  = { ...withBoss({ maxHp: 2000, currentHp: 2000, modifierId: 'weak_critical' }), firstStrikeDate: today };
 
   const critMeta = { taskId: 'c1', importance: 'Critical', onTime: false };
@@ -212,7 +213,7 @@ test('first strike × modifier stacks multiplicatively', () => {
 });
 
 test('early_bird: 1.5× before noon, 1× after noon', () => {
-  const today = getLocalDateStr(NOW);
+  const today = gameDate(NOW);
   const base  = { ...withBoss({ maxHp: 5000, currentHp: 5000, modifierId: 'early_bird' }), firstStrikeDate: today };
   const meta  = { taskId: 'e1', importance: 'Medium', onTime: false };
 
@@ -227,7 +228,7 @@ test('early_bird: 1.5× before noon, 1× after noon', () => {
 });
 
 test('punctual: 1.5× on onTime=true, 1× on false', () => {
-  const today = getLocalDateStr(NOW);
+  const today = gameDate(NOW);
   const base  = { ...withBoss({ maxHp: 5000, currentHp: 5000, modifierId: 'punctual' }), firstStrikeDate: today };
 
   const onTime  = { taskId: 'p1', importance: 'Medium', onTime: true  };
@@ -282,7 +283,7 @@ test('setTier: works while undamaged, recomputes HP', () => {
 });
 
 test('setTier: rejected after first damage', () => {
-  const today   = getLocalDateStr(NOW);
+  const today   = gameDate(NOW);
   const state   = { ...freshState(), firstStrikeDate: today };
   const meta    = { taskId: 't1', importance: 'Medium', onTime: false };
   const damaged = applyDamageToState(state, 10, meta, NOW);
@@ -353,4 +354,31 @@ test('corrupt localStorage: fresh spawn, no throw', () => {
   if (restore !== undefined) global.localStorage = restore;
   else delete global.localStorage;
   _resetForTesting();
+});
+
+// ── 12. First Strike boundary at 3 AM, not midnight ──────────────────────────
+test('first strike: resets at 3 AM boundary, not midnight', () => {
+  // Jan 14, 2024 at 9 PM — first task of that game-day → first strike fires
+  const jan14_9pm = new Date(2024, 0, 14, 21, 0, 0).getTime();
+  // Jan 15, 2024 at 2 AM — still Jan 14 game-day (< 3 AM rollover) → NO first strike
+  const jan15_2am = new Date(2024, 0, 15, 2, 0, 0).getTime();
+  // Jan 15, 2024 at 3:01 AM — now Jan 15 game-day → first strike resets
+  const jan15_3am = new Date(2024, 0, 15, 3, 1, 0).getTime();
+
+  const state = withBoss({ maxHp: 5000, currentHp: 5000, modifierId: 'punctual' });
+  const meta  = { taskId: 't1', importance: 'Medium', onTime: false };
+
+  // First task at 9 PM → 2× first strike, firstStrikeDate = Jan 14 game-day
+  const after1 = applyDamageToState(state, 30, meta, jan14_9pm);
+  assert.equal(after1.boss.currentHp, 5000 - 30 * CONFIG.FIRST_STRIKE_MULT);
+  assert.equal(after1.firstStrikeDate, gameDate(jan14_9pm));
+
+  // Task at 2 AM Jan 15 → same game-day as Jan 14 (1×, no bonus)
+  const after2 = applyDamageToState(after1, 30, { ...meta, taskId: 't2' }, jan15_2am);
+  assert.equal(after2.boss.currentHp, after1.boss.currentHp - 30);
+
+  // Task at 3:01 AM Jan 15 → new game-day → first strike resets (2×)
+  const after3 = applyDamageToState(after2, 30, { ...meta, taskId: 't3' }, jan15_3am);
+  assert.equal(after3.boss.currentHp, after2.boss.currentHp - 30 * CONFIG.FIRST_STRIKE_MULT);
+  assert.equal(after3.firstStrikeDate, gameDate(jan15_3am));
 });

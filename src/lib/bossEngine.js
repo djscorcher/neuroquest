@@ -1,3 +1,5 @@
+import { gameDate } from './gameDay.js';
+
 // ── CONFIG ─────────────────────────────────────────────────────────────────
 export const CONFIG = {
   CYCLE_MS:          72 * 3600 * 1000,
@@ -170,7 +172,7 @@ export function resolveAndRespawn(state, outcome, now) {
 export function applyDamageToState(state, taskXp, taskMeta, now) {
   const { boss } = state;
 
-  const todayStr     = getLocalDateStr(now);
+  const todayStr     = gameDate(now);
   const isFirstStrike = state.firstStrikeDate !== todayStr;
   const fsMult       = isFirstStrike ? CONFIG.FIRST_STRIKE_MULT : 1.0;
   const modMult      = computeModifierMult(boss.modifierId, taskMeta, now);
