@@ -347,6 +347,15 @@ function useSound() {
         g.gain.setValueAtTime(0.08,c.currentTime);
         g.gain.exponentialRampToValueAtTime(0.001,c.currentTime+0.15);
         o.start(); o.stop(c.currentTime+0.15);
+      } else if (type==="nudge") {
+        [523,784,1047,1319].forEach((f,i)=>{
+          const o2=c.createOscillator(),g2=c.createGain();
+          o2.connect(g2); g2.connect(c.destination);
+          o2.type="sine"; o2.frequency.value=f;
+          g2.gain.setValueAtTime(0.1,c.currentTime+i*0.09);
+          g2.gain.exponentialRampToValueAtTime(0.001,c.currentTime+i*0.09+0.3);
+          o2.start(c.currentTime+i*0.09); o2.stop(c.currentTime+i*0.09+0.3);
+        });
       }
     } catch {}
   }, []);
@@ -369,6 +378,16 @@ function DerankFlash({ show, level, t }) {
     <div style={{ position:"fixed",inset:0,zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",flexDirection:"column",gap:12 }}>
       <div style={{ fontFamily:"'Orbitron',monospace",fontWeight:900,fontSize:"clamp(2rem,8vw,4rem)",color:t.danger,textShadow:`0 0 40px ${t.danger},0 0 80px #ff0000`,letterSpacing:"0.15em",animation:"shake 0.5s ease,fadeOut 1.8s ease forwards" }}>⬇ RANK LOST</div>
       <div style={{ fontFamily:"'Orbitron',monospace",fontSize:"clamp(0.9rem,3vw,1.3rem)",color:t.danger,letterSpacing:"0.2em",animation:"fadeOut 1.8s 0.2s ease forwards" }}>LEVEL {level} — {getRank(level)}</div>
+    </div>
+  );
+}
+
+function NudgeFlash({ nudge, t }) {
+  if (!nudge) return null;
+  return (
+    <div style={{ position:"fixed",inset:0,zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",flexDirection:"column",gap:16 }}>
+      <div style={{ fontFamily:"'Orbitron',monospace",fontWeight:900,fontSize:"clamp(1.6rem,7vw,3rem)",color:t.secondary,textShadow:`0 0 40px ${t.secondary},0 0 80px ${t.primary}`,letterSpacing:"0.12em",animation:"scaleIn 0.4s cubic-bezier(0.34,1.56,0.64,1) forwards,fadeOut 2.2s ease forwards",textAlign:"center",padding:"0 16px",maxWidth:"85vw" }}>{nudge.message}</div>
+      <div style={{ fontFamily:"'Orbitron',monospace",fontSize:"clamp(0.65rem,2.5vw,0.9rem)",color:t.primary,letterSpacing:"0.2em",animation:"fadeOut 2.2s 0.3s ease forwards" }}>from {nudge.senderName}</div>
     </div>
   );
 }
@@ -925,6 +944,8 @@ export default function App() {
   const [deleteConfirm,setDeleteConfirm]=useState(false);
   const [deleteError,setDeleteError]=useState("");
   const [showFriendsModal,setShowFriendsModal]=useState(false);
+  const [nudgeQueue,setNudgeQueue]=useState([]);
+  const [activeNudge,setActiveNudge]=useState(null);
   const inputRef=useRef();
   const prevXpRef=useRef(0);
   const syncTimers=useRef({});
@@ -946,6 +967,17 @@ export default function App() {
   useEffect(()=>{localStorage.setItem("nq_completed",JSON.stringify(completed));},[completed]);
   useEffect(()=>{localStorage.setItem("nq_missed",JSON.stringify(missed));},[missed]);
   useEffect(()=>{ if(screen==="game") music.startMusic(); },[screen]);
+
+  // Nudge queue — show one at a time, mark seen, then advance
+  useEffect(()=>{
+    if(activeNudge||!nudgeQueue.length)return;
+    const next=nudgeQueue[0];
+    setActiveNudge(next);
+    play("nudge");
+    supabase.from('nudges').update({seen:true}).eq('id',next.id).then(()=>{});
+    const timer=setTimeout(()=>{setActiveNudge(null);setNudgeQueue(prev=>prev.slice(1));},2500);
+    return()=>clearTimeout(timer);
+  },[nudgeQueue,activeNudge,play]);
   useEffect(()=>{
     const prevLv=Math.floor(prevXpRef.current/XP_PER_LEVEL)+1;
     if(level>prevLv){setShowLevelUp(true);play("levelup");setTimeout(()=>setShowLevelUp(false),1800);}
@@ -1058,6 +1090,26 @@ export default function App() {
     return () => subscription.unsubscribe();
   },[]);
 
+  // On login: fire any nudges that arrived while the user was offline
+  useEffect(()=>{
+    if(!authUser?.id)return;
+    (async()=>{
+      const {data:unseen}=await supabase
+        .from('nudges').select('id,message,sender_id')
+        .eq('recipient_id',authUser.id).eq('seen',false)
+        .order('created_at',{ascending:true});
+      if(!unseen?.length)return;
+      const senderIds=[...new Set(unseen.map(n=>n.sender_id))];
+      const {data:senders}=await supabase.from('profiles').select('id,player_name').in('id',senderIds);
+      const nameMap={};
+      (senders??[]).forEach(s=>{nameMap[s.id]=s.player_name;});
+      setNudgeQueue(prev=>{
+        const existingIds=new Set(prev.map(n=>n.id));
+        return [...prev,...unseen.filter(n=>!existingIds.has(n.id)).map(n=>({id:n.id,message:n.message,senderName:nameMap[n.sender_id]??"FRIEND"}))];
+      });
+    })();
+  },[authUser?.id]);
+
   // Realtime subscription — pushes DB changes instantly to this client so multi-device
   // state converges without polling. recency guard in refreshFromCloud blocks echo from
   // our own writes so we don't pull back data we just pushed.
@@ -1072,6 +1124,16 @@ export default function App() {
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'tasks', filter: `user_id=eq.${authUser.id}` },
         () => refreshFromCloud()
+      )
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'nudges', filter: `recipient_id=eq.${authUser.id}` },
+        async (payload) => {
+          const {data:sender}=await supabase.from('profiles').select('player_name').eq('id',payload.new.sender_id).single();
+          setNudgeQueue(prev=>{
+            if(prev.some(n=>n.id===payload.new.id))return prev;
+            return [...prev,{id:payload.new.id,message:payload.new.message,senderName:sender?.player_name??"FRIEND"}];
+          });
+        }
       )
       .subscribe();
     return () => supabase.removeChannel(channel);
@@ -1185,6 +1247,7 @@ export default function App() {
         <>
           <LevelUpFlash show={showLevelUp} level={level} t={t}/>
           <DerankFlash show={showDerank} level={level} t={t}/>
+          <NudgeFlash nudge={activeNudge} t={t}/>
           <XPPopup popups={popups} t={t}/>
           <div style={{ minHeight:"100vh",background:t.bgGrad,fontFamily:"'Exo 2',sans-serif",position:"relative",overflow:"hidden" }}>
             <div style={{ position:"fixed",inset:0,pointerEvents:"none",zIndex:0,backgroundImage:`linear-gradient(${t.grid} 1px,transparent 1px),linear-gradient(90deg,${t.grid} 1px,transparent 1px)`,backgroundSize:"60px 60px",animation:"gridMove 4s linear infinite" }}/>
