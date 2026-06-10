@@ -999,49 +999,58 @@ export default function App() {
   // Auth state listener — hydrates from Supabase on login, migrates localStorage on first sync
   useEffect(()=>{
     const { data:{ subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        setAuthUser(session.user);
-        const uid = session.user.id;
-        const data = await fetchUserData(uid);
-        if (!data) return; // offline — localStorage state already loaded
-        const ls = localState.current;
-        if (!data.profile) {
-          // Brand-new account: push current local progress up to Supabase
+      if (!session?.user) { setAuthUser(null); setProfile(null); return; }
+
+      // Token refresh just updates the session object — data hasn't changed, skip re-hydration
+      if (event === 'TOKEN_REFRESHED') { setAuthUser(session.user); return; }
+
+      const uid = session.user.id;
+      const data = await fetchUserData(uid);
+      if (!data) { setAuthUser(session.user); return; } // offline: show logged-in UI, keep localStorage
+
+      const ls = localState.current;
+      if (!data.profile) {
+        // Brand-new account: push current local progress up to Supabase
+        await syncProfile(uid, { playerName: ls.playerName, xp: ls.xp, themeKey: ls.themeKey });
+        await syncAllLists(uid, ls.tasks, ls.completed, ls.missed);
+        setProfile({ id: uid, player_name: ls.playerName, xp: ls.xp, theme_key: ls.themeKey });
+      } else {
+        const isDefaultProfile = data.profile.player_name === 'HERO' && data.profile.xp === 0;
+        const hasLocalProgress = ls.playerName !== 'HERO' || ls.xp > 0 || ls.tasks.length || ls.completed.length || ls.missed.length;
+        if (isDefaultProfile && hasLocalProgress) {
           await syncProfile(uid, { playerName: ls.playerName, xp: ls.xp, themeKey: ls.themeKey });
           await syncAllLists(uid, ls.tasks, ls.completed, ls.missed);
           setProfile({ id: uid, player_name: ls.playerName, xp: ls.xp, theme_key: ls.themeKey });
         } else {
-          // Returning user: pull Supabase data down
-          // If the profile has all-default values it was auto-created by the DB trigger,
-          // not filled in by the user — prefer local progress in that case.
-          const isDefaultProfile = data.profile.player_name === 'HERO' && data.profile.xp === 0;
-          const hasLocalProgress = ls.playerName !== 'HERO' || ls.xp > 0 || ls.tasks.length || ls.completed.length || ls.missed.length;
-          if (isDefaultProfile && hasLocalProgress) {
-            await syncProfile(uid, { playerName: ls.playerName, xp: ls.xp, themeKey: ls.themeKey });
+          setProfile(data.profile);
+          setPlayerName(data.profile.player_name);
+          setXp(data.profile.xp);
+          setThemeKey(data.profile.theme_key);
+          const hasCloud = data.tasks.length || data.completed.length || data.missed.length;
+          if (!hasCloud && (ls.tasks.length || ls.completed.length || ls.missed.length)) {
             await syncAllLists(uid, ls.tasks, ls.completed, ls.missed);
-            setProfile({ id: uid, player_name: ls.playerName, xp: ls.xp, theme_key: ls.themeKey });
           } else {
-            setProfile(data.profile);
-            setPlayerName(data.profile.player_name);
-            setXp(data.profile.xp);
-            setThemeKey(data.profile.theme_key);
-            const hasCloud = data.tasks.length || data.completed.length || data.missed.length;
-            if (!hasCloud && (ls.tasks.length || ls.completed.length || ls.missed.length)) {
-              await syncAllLists(uid, ls.tasks, ls.completed, ls.missed);
-            } else {
-              setTasks(data.tasks);
-              setCompleted(data.completed);
-              setMissed(data.missed);
-            }
+            setTasks(data.tasks);
+            setCompleted(data.completed);
+            setMissed(data.missed);
           }
         }
-      } else {
-        setAuthUser(null);
-        setProfile(null);
       }
+      // Set authUser LAST — sync effects gate on authUser; firing them after hydration
+      // guarantees they capture cloud state, not the stale localStorage values
+      setAuthUser(session.user);
     });
     return () => subscription.unsubscribe();
   },[]);
+
+  // Periodic pull — keeps simultaneously open devices converging every 30s.
+  // Replaces nothing if data matches (React bails on same-value state updates).
+  // Phase 2 Realtime will make this instant and remove the need for polling.
+  useEffect(()=>{
+    if (!authUser) return;
+    const id = setInterval(()=>refreshFromCloud(), 30000);
+    return ()=>clearInterval(id);
+  },[authUser, refreshFromCloud]);
 
   // Write-through: sync profile + each task list to Supabase on any change (debounced 800ms)
   useEffect(()=>{
