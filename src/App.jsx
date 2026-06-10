@@ -1005,8 +1005,10 @@ export default function App() {
     const { data:{ subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!session?.user) { setAuthUser(null); setProfile(null); return; }
 
-      // Token refresh just updates the session object — data hasn't changed, skip re-hydration
-      if (event === 'TOKEN_REFRESHED') { setAuthUser(session.user); return; }
+      // Token rotation — user ID is unchanged, no hydration needed, and calling setAuthUser
+      // here would trigger write-through effects before SIGNED_IN hydration finishes, pushing
+      // stale localStorage state (e.g. HERO/0) to Supabase and overwriting the real profile.
+      if (event === 'TOKEN_REFRESHED') return;
 
       const uid = session.user.id;
       const data = await fetchUserData(uid);
@@ -1052,9 +1054,26 @@ export default function App() {
     return () => subscription.unsubscribe();
   },[]);
 
-  // Periodic pull — keeps simultaneously open devices converging every 30s.
-  // Replaces nothing if data matches (React bails on same-value state updates).
-  // Phase 2 Realtime will make this instant and remove the need for polling.
+  // Realtime subscription — pushes DB changes instantly to this client so multi-device
+  // state converges without polling. recency guard in refreshFromCloud blocks echo from
+  // our own writes so we don't pull back data we just pushed.
+  useEffect(()=>{
+    if (!authUser) return;
+    const channel = supabase
+      .channel(`user-sync-${authUser.id}`)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${authUser.id}` },
+        () => refreshFromCloud()
+      )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'tasks', filter: `user_id=eq.${authUser.id}` },
+        () => refreshFromCloud()
+      )
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  },[authUser, refreshFromCloud]);
+
+  // Fallback poll — Realtime handles instant sync; this catches websocket disconnects / missed events.
   useEffect(()=>{
     if (!authUser) return;
     const id = setInterval(()=>refreshFromCloud(), 30000);
