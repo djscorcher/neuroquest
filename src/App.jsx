@@ -817,17 +817,19 @@ function AuthModal({ open, onClose, guestXp, t }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [signupSent, setSignupSent] = useState(false);
 
   if (!open) return null;
 
-  const reset = () => { setEmail(""); setPassword(""); setError(""); setLoading(false); };
+  const reset = () => { setEmail(""); setPassword(""); setError(""); setLoading(false); setSignupSent(false); };
 
   const handleSignUp = async () => {
     if (!email.trim() || password.length < 6) return;
     setLoading(true); setError("");
     const { error: authErr } = await supabase.auth.signUp({ email, password });
     if (authErr) { setError(authErr.message); setLoading(false); return; }
-    setLoading(false); reset(); onClose();
+    setLoading(false);
+    setSignupSent(true);
   };
 
   const handleSignIn = async () => {
@@ -840,7 +842,15 @@ function AuthModal({ open, onClose, guestXp, t }) {
       resolvedEmail = found;
     }
     const { error: authErr } = await supabase.auth.signInWithPassword({ email: resolvedEmail, password });
-    if (authErr) { setError(authErr.message); setLoading(false); return; }
+    if (authErr) {
+      const msg = authErr.message.toLowerCase();
+      if (msg.includes("email not confirmed") || msg.includes("not confirmed")) {
+        setError("Please confirm your email first — check your inbox for a link from Supabase.");
+      } else {
+        setError(authErr.message);
+      }
+      setLoading(false); return;
+    }
     setLoading(false); reset(); onClose();
   };
 
@@ -858,6 +868,24 @@ function AuthModal({ open, onClose, guestXp, t }) {
 
   const inp = { width:"100%",background:`${t.primary}11`,border:`1px solid ${t.primary}44`,borderRadius:8,padding:"11px 14px",color:"#e0f0ff",fontFamily:"'Exo 2',sans-serif",fontSize:14,outline:"none",marginBottom:12 };
   const primaryBtn = { width:"100%",padding:"12px 0",fontFamily:"'Orbitron',monospace",fontSize:11,letterSpacing:"0.12em",border:"none",borderRadius:8,fontWeight:700,marginBottom:10,transition:"all 0.2s" };
+
+  if (signupSent) return (
+    <div style={{ position:"fixed",inset:0,zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.75)",backdropFilter:"blur(4px)",padding:16 }}>
+      <div style={{ width:"100%",maxWidth:400,background:t.card,backdropFilter:"blur(24px)",border:`1px solid ${t.border}`,borderRadius:16,padding:"32px 28px",animation:"scaleIn 0.25s cubic-bezier(0.34,1.56,0.64,1) forwards",textAlign:"center" }}>
+        <div style={{ fontSize:40,marginBottom:16 }}>📧</div>
+        <div style={{ fontFamily:"'Orbitron',monospace",fontSize:14,fontWeight:700,color:t.secondary,letterSpacing:"0.1em",marginBottom:12 }}>CHECK YOUR EMAIL</div>
+        <div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:t.accent,marginBottom:8,lineHeight:1.6 }}>
+          We sent a confirmation link to <strong style={{ color:"#e0f0ff" }}>{email}</strong>.
+        </div>
+        <div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:12,color:t.accent,opacity:0.7,marginBottom:24,lineHeight:1.6 }}>
+          Click the link in that email, then come back here and sign in.
+        </div>
+        <button onClick={()=>{reset();setMode("signin");}} style={{ width:"100%",padding:"12px 0",fontFamily:"'Orbitron',monospace",fontSize:11,letterSpacing:"0.12em",background:`linear-gradient(135deg,${t.primary},${t.secondary})`,border:"none",borderRadius:8,cursor:"pointer",color:t.bg,fontWeight:700,boxShadow:`0 0 16px ${t.primary}66` }}>
+          GO TO SIGN IN →
+        </button>
+      </div>
+    </div>
+  );
 
   return (
     <div style={{ position:"fixed",inset:0,zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.75)",backdropFilter:"blur(4px)",padding:16 }}
