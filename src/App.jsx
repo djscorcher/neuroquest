@@ -1016,8 +1016,12 @@ export default function App() {
 
       const ls = localState.current;
       if (!data.profile) {
-        // Brand-new account: push current local progress up to Supabase
-        await syncProfile(uid, { playerName: ls.playerName, xp: ls.xp, themeKey: ls.themeKey });
+        // Trigger race: DB trigger normally creates the profile row synchronously, but if it
+        // hasn't landed yet, INSERT directly. syncProfile uses UPDATE and won't create a new row.
+        const { error: insErr } = await supabase.from('profiles').insert({
+          id: uid, player_name: ls.playerName, xp: ls.xp, theme_key: ls.themeKey,
+        });
+        if (insErr) console.error('[auth] profile insert failed:', insErr.message);
         await syncAllLists(uid, ls.tasks, ls.completed, ls.missed);
         setProfile({ id: uid, player_name: ls.playerName, xp: ls.xp, theme_key: ls.themeKey });
       } else {

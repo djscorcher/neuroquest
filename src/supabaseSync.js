@@ -66,12 +66,13 @@ export const fetchUserData = async (userId) => {
 };
 
 export const syncProfile = async (userId, { playerName, xp, themeKey, streak = 0, completedCount = 0 }) => {
-  try {
-    await supabase.from('profiles').upsert(
-      { id: userId, player_name: playerName, xp, theme_key: themeKey, streak, completed_count: completedCount },
-      { onConflict: 'id' }
-    );
-  } catch (_) {}
+  // UPDATE, not upsert — upsert requires INSERT privilege; the profiles RLS only grants
+  // UPDATE to the authenticated user. INSERT is handled exclusively by the DB trigger.
+  const { error } = await supabase
+    .from('profiles')
+    .update({ player_name: playerName, xp, theme_key: themeKey, streak, completed_count: completedCount })
+    .eq('id', userId);
+  if (error) console.error('[syncProfile]', error.code, error.message);
 };
 
 export const insertActivityEvent = async (userId, xpEarned) => {
@@ -83,11 +84,12 @@ export const insertActivityEvent = async (userId, xpEarned) => {
 // Full replace for one list: delete existing rows then insert current items.
 // localStorage is the source of truth so a brief gap is fine.
 export const syncList = async (userId, list, items) => {
-  try {
-    const rows = items.map((t, i) => toDbTask(t, userId, list, i));
-    await supabase.from('tasks').delete().eq('user_id', userId).eq('list', list);
-    if (rows.length) await supabase.from('tasks').insert(rows);
-  } catch (_) {}
+  const rows = items.map((t, i) => toDbTask(t, userId, list, i));
+  const { error: delErr } = await supabase.from('tasks').delete().eq('user_id', userId).eq('list', list);
+  if (delErr) { console.error('[syncList delete]', list, delErr.message); return; }
+  if (!rows.length) return;
+  const { error: insErr } = await supabase.from('tasks').insert(rows);
+  if (insErr) console.error('[syncList insert]', list, insErr.message);
 };
 
 export const syncAllLists = (userId, tasks, completed, missed) =>
