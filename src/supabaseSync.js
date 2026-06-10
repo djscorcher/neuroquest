@@ -16,6 +16,7 @@ const toDbTask = (task, userId, list, sortOrder) => ({
   repeat: task.repeat ?? 'none',
   repeat_every: task.repeatEvery ?? 2,
   created_at_ms: task.createdAt ?? 0,
+  completed_at_ms: task.completedAt ?? null,
   awarded_xp: task.awardedXp ?? null,
   timing: task.timing ?? null,
   missed_reason: task.missedReason ?? null,
@@ -35,6 +36,7 @@ const fromDbTask = (row) => ({
   repeat: row.repeat,
   repeatEvery: row.repeat_every,
   createdAt: row.created_at_ms,
+  completedAt: row.completed_at_ms,
   awardedXp: row.awarded_xp,
   timing: row.timing,
   missedReason: row.missed_reason,
@@ -63,12 +65,18 @@ export const fetchUserData = async (userId) => {
   }
 };
 
-export const syncProfile = async (userId, { playerName, xp, themeKey }) => {
+export const syncProfile = async (userId, { playerName, xp, themeKey, streak = 0, completedCount = 0 }) => {
   try {
     await supabase.from('profiles').upsert(
-      { id: userId, player_name: playerName, xp, theme_key: themeKey },
+      { id: userId, player_name: playerName, xp, theme_key: themeKey, streak, completed_count: completedCount },
       { onConflict: 'id' }
     );
+  } catch (_) {}
+};
+
+export const insertActivityEvent = async (userId, xpEarned) => {
+  try {
+    await supabase.from('activity_events').insert({ user_id: userId, xp_earned: xpEarned });
   } catch (_) {}
 };
 

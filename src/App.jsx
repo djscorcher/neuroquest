@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { supabase } from "./supabaseClient";
-import { fetchUserData, syncProfile, syncList, syncAllLists } from "./supabaseSync";
+import { fetchUserData, syncProfile, syncList, syncAllLists, insertActivityEvent } from "./supabaseSync";
+import FriendsModal from "./FriendsModal";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const DIFFICULTY_BASE       = { Easy: 10, Medium: 25, Hard: 50 };
@@ -76,6 +77,18 @@ const DIFF_COLORS = (t) => ({
   Medium: { bg:`rgba(0,180,255,0.12)`, border:t.primary,   text:t.primary   },
   Hard:   { bg:`rgba(180,0,255,0.15)`, border:t.accent,    text:t.accent    },
 });
+
+const computeStreak = (completed) => {
+  const days = new Set(completed.filter(t=>t.completedAt).map(t=>new Date(t.completedAt).toLocaleDateString()));
+  if (!days.size) return 0;
+  const today = new Date().toLocaleDateString();
+  const yesterday = new Date(Date.now()-86400000).toLocaleDateString();
+  let cursor = days.has(today) ? new Date() : days.has(yesterday) ? new Date(Date.now()-86400000) : null;
+  if (!cursor) return 0;
+  let streak = 0;
+  while (days.has(cursor.toLocaleDateString())) { streak++; cursor = new Date(cursor.getTime()-86400000); }
+  return streak;
+};
 
 const defaultQuest = (over={}) => ({
   id: Date.now()+Math.random(),
@@ -870,15 +883,19 @@ function AuthModal({ open, onClose, guestXp, t }) {
   );
 }
 
-// ── Multiplayer Row (locked placeholder) ──────────────────────────────────
-function MultiplayerRow({ isGuest, t }) {
-  const label = isGuest ? "Create an account to unlock" : "Coming soon";
-  const btnStyle = { flex:1,padding:"9px 0",fontFamily:"'Orbitron',monospace",fontSize:8.5,letterSpacing:"0.06em",border:`1px solid ${t.border}`,borderRadius:8,cursor:"default",background:"transparent",color:`${t.accent}55`,opacity:0.55 };
+// ── Multiplayer Row ────────────────────────────────────────────────────────
+function MultiplayerRow({ isGuest, t, onFriends }) {
+  const label = isGuest ? "Create an account to unlock social features" : "Connect with other players";
+  const locked  = { flex:1,padding:"9px 0",fontFamily:"'Orbitron',monospace",fontSize:8.5,letterSpacing:"0.06em",border:`1px solid ${t.border}`,borderRadius:8,cursor:"default",background:"transparent",color:`${t.accent}55`,opacity:0.55 };
+  const active  = { flex:1,padding:"9px 0",fontFamily:"'Orbitron',monospace",fontSize:8.5,letterSpacing:"0.06em",border:`1px solid ${t.primary}66`,borderRadius:8,cursor:"pointer",background:`${t.primary}11`,color:t.primary,transition:"all 0.2s" };
   return (
     <div style={{ marginBottom:16 }}>
       <div style={{ display:"flex",gap:6 }}>
-        <button style={btnStyle} disabled>🔒 GUILD</button>
-        <button style={btnStyle} disabled>🔒 LEADERBOARD</button>
+        <button style={isGuest?locked:active} disabled={isGuest} onClick={isGuest?undefined:onFriends}>
+          {isGuest?"🔒 FRIENDS":"FRIENDS"}
+        </button>
+        <button style={locked} disabled>🔒 GUILD</button>
+        <button style={locked} disabled>🔒 LEADERBOARD</button>
       </div>
       <div style={{ textAlign:"center",marginTop:5,fontFamily:"'Exo 2',sans-serif",fontSize:10,color:`${t.accent}55`,letterSpacing:"0.05em" }}>{label}</div>
     </div>
@@ -907,6 +924,7 @@ export default function App() {
   const [showAuthModal,setShowAuthModal]=useState(false);
   const [deleteConfirm,setDeleteConfirm]=useState(false);
   const [deleteError,setDeleteError]=useState("");
+  const [showFriendsModal,setShowFriendsModal]=useState(false);
   const inputRef=useRef();
   const prevXpRef=useRef(0);
   const syncTimers=useRef({});
@@ -1003,8 +1021,9 @@ export default function App() {
   useEffect(()=>{
     if (!authUser) return;
     clearTimeout(syncTimers.current.profile);
-    syncTimers.current.profile = setTimeout(()=>syncProfile(authUser.id,{playerName,xp,themeKey}),800);
-  },[playerName,xp,themeKey,authUser]);
+    const streak=computeStreak(completed);
+    syncTimers.current.profile = setTimeout(()=>syncProfile(authUser.id,{playerName,xp,themeKey,streak,completedCount:completed.length}),800);
+  },[playerName,xp,themeKey,completed,authUser]);
   useEffect(()=>{
     if (!authUser) return;
     clearTimeout(syncTimers.current.tasks);
@@ -1051,7 +1070,9 @@ export default function App() {
     if(repeats){const next=defaultQuest({...task,dueDate:task.dueDate?advanceDue(task.dueDate,task.repeat,task.repeatEvery):null,timerMissed:false});setTasks(prev=>[...prev.filter(x=>x.id!==id),next]);}
     else setTasks(prev=>prev.filter(x=>x.id!==id));
     if(editingId===id)resetForm();
-    setCompleted(prev=>[{...task,awardedXp:total,timing},...prev]);play("complete");applyXp(total);
+    setCompleted(prev=>[{...task,awardedXp:total,timing,completedAt:Date.now()},...prev]);
+  play("complete");applyXp(total);
+  if(authUser) insertActivityEvent(authUser.id,total);
   };
   const deleteTask=id=>{setTasks(prev=>prev.filter(x=>x.id!==id));if(editingId===id)resetForm();play("delete");};
   const deleteMissed=id=>{setMissed(prev=>prev.filter(x=>x.id!==id));play("delete");};
@@ -1143,7 +1164,7 @@ export default function App() {
               <MusicBar music={music} t={t}/>
 
               {/* Multiplayer (locked placeholder) */}
-              <MultiplayerRow isGuest={!authUser} t={t}/>
+              <MultiplayerRow isGuest={!authUser} t={t} onFriends={()=>setShowFriendsModal(true)}/>
 
               {/* Tip */}
               <div style={{ background:`${t.primary}0d`,border:`1px solid ${t.primary}22`,borderRadius:10,padding:"10px 16px",marginBottom:20,display:"flex",gap:10,alignItems:"center" }}>
@@ -1173,6 +1194,7 @@ export default function App() {
         </>
       )}
       <AuthModal open={showAuthModal} onClose={()=>setShowAuthModal(false)} guestXp={xp} t={t}/>
+      <FriendsModal open={showFriendsModal} onClose={()=>setShowFriendsModal(false)} userId={authUser?.id} t={t}/>
     </>
   );
 }
