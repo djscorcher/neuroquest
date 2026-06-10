@@ -985,7 +985,7 @@ export default function App() {
   const [streakToasts,setStreakToasts]=useState([]);
   const [trialState,setTrialState]=useState(()=>getTrialState());
   const [trialToasts,setTrialToasts]=useState([]);
-  const FRESH_NOTIFY_PREFS=()=>({streakAtRisk:true,bossExpiry:true,dailyReminder:false,dailyReminderTime:'09:00',tz:Intl.DateTimeFormat().resolvedOptions().timeZone});
+  const FRESH_NOTIFY_PREFS=()=>({streakAtRisk:false,bossExpiry:false,dailyReminder:false,dailyReminderTime:'09:00',tz:Intl.DateTimeFormat().resolvedOptions().timeZone});
   const [notifyPrefs,setNotifyPrefs]=useState(()=>{try{const s=localStorage.getItem('nq_notify_prefs');return s?{...FRESH_NOTIFY_PREFS(),...JSON.parse(s)}:FRESH_NOTIFY_PREFS();}catch{return FRESH_NOTIFY_PREFS();}});
   const [deferredPrompt,setDeferredPrompt]=useState(null);
   const [showInstallCard,setShowInstallCard]=useState(false);
