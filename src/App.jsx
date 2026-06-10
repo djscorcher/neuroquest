@@ -928,6 +928,7 @@ export default function App() {
   const inputRef=useRef();
   const prevXpRef=useRef(0);
   const syncTimers=useRef({});
+  const lastLocalChangeRef=useRef(0);
   // Always-current snapshot of local state for use inside async callbacks
   const localState=useRef({});
   localState.current={playerName,xp,themeKey,tasks,completed,missed};
@@ -973,6 +974,9 @@ export default function App() {
   // Pull the canonical Supabase state and overwrite local — called on login and on tab focus
   const refreshFromCloud = useCallback(async () => {
     if (!authUser) return;
+    // Skip if a local mutation happened in the last 2.5s — the write-through sync hasn't
+    // finished yet, so pulling now would roll back the local change before it reaches Supabase
+    if (Date.now() - lastLocalChangeRef.current < 2500) return;
     const data = await fetchUserData(authUser.id);
     if (!data?.profile) return; // offline or no profile yet
     setProfile(data.profile);
@@ -1015,7 +1019,12 @@ export default function App() {
         await syncAllLists(uid, ls.tasks, ls.completed, ls.missed);
         setProfile({ id: uid, player_name: ls.playerName, xp: ls.xp, theme_key: ls.themeKey });
       } else {
-        const isDefaultProfile = data.profile.player_name === 'HERO' && data.profile.xp === 0;
+        // Trigger-created default: name=HERO, xp=0, AND no task rows whatsoever.
+        // Requiring empty task rows prevents triggering on real accounts with low progress
+        // or partially synced profiles where the profile row exists but task sync was incomplete.
+        const isDefaultProfile = data.profile.player_name === 'HERO'
+          && data.profile.xp === 0
+          && !data.tasks.length && !data.completed.length && !data.missed.length;
         const hasLocalProgress = ls.playerName !== 'HERO' || ls.xp > 0 || ls.tasks.length || ls.completed.length || ls.missed.length;
         if (isDefaultProfile && hasLocalProgress) {
           await syncProfile(uid, { playerName: ls.playerName, xp: ls.xp, themeKey: ls.themeKey });
@@ -1052,25 +1061,32 @@ export default function App() {
     return ()=>clearInterval(id);
   },[authUser, refreshFromCloud]);
 
-  // Write-through: sync profile + each task list to Supabase on any change (debounced 800ms)
+  // Write-through: sync profile + each task list to Supabase on any change.
+  // Bumping lastLocalChangeRef here prevents refreshFromCloud from pulling stale data
+  // during the sync window. Profile and completed use 150ms (carry XP — need fast push);
+  // tasks and missed use 800ms (lower urgency, higher write volume).
   useEffect(()=>{
     if (!authUser) return;
+    lastLocalChangeRef.current = Date.now();
     clearTimeout(syncTimers.current.profile);
     const streak=computeStreak(completed);
-    syncTimers.current.profile = setTimeout(()=>syncProfile(authUser.id,{playerName,xp,themeKey,streak,completedCount:completed.length}),800);
+    syncTimers.current.profile = setTimeout(()=>syncProfile(authUser.id,{playerName,xp,themeKey,streak,completedCount:completed.length}),150);
   },[playerName,xp,themeKey,completed,authUser]);
   useEffect(()=>{
     if (!authUser) return;
+    lastLocalChangeRef.current = Date.now();
     clearTimeout(syncTimers.current.tasks);
     syncTimers.current.tasks = setTimeout(()=>syncList(authUser.id,'active',tasks),800);
   },[tasks,authUser]);
   useEffect(()=>{
     if (!authUser) return;
+    lastLocalChangeRef.current = Date.now();
     clearTimeout(syncTimers.current.completed);
-    syncTimers.current.completed = setTimeout(()=>syncList(authUser.id,'completed',completed),800);
+    syncTimers.current.completed = setTimeout(()=>syncList(authUser.id,'completed',completed),150);
   },[completed,authUser]);
   useEffect(()=>{
     if (!authUser) return;
+    lastLocalChangeRef.current = Date.now();
     clearTimeout(syncTimers.current.missed);
     syncTimers.current.missed = setTimeout(()=>syncList(authUser.id,'missed',missed),800);
   },[missed,authUser]);
