@@ -65,13 +65,13 @@ export const fetchUserData = async (userId) => {
   }
 };
 
-export const syncProfile = async (userId, { playerName, xp, themeKey, streak = 0, completedCount = 0 }) => {
+export const syncProfile = async (userId, { playerName, xp, themeKey, streak = 0, completedCount = 0, gems = 0, titles = [], bossState = null }) => {
   // UPDATE, not upsert — upsert requires INSERT privilege; the profiles RLS only grants
   // UPDATE to the authenticated user. INSERT is handled exclusively by the DB trigger.
-  const { error } = await supabase
-    .from('profiles')
-    .update({ player_name: playerName, xp, theme_key: themeKey, streak, completed_count: completedCount })
-    .eq('id', userId);
+  const payload = { player_name: playerName, xp, theme_key: themeKey, streak, completed_count: completedCount, gems };
+  if (titles.length)    payload.titles     = titles;
+  if (bossState)        payload.boss_state = bossState;
+  const { error } = await supabase.from('profiles').update(payload).eq('id', userId);
   if (error) console.error('[syncProfile]', error.code, error.message);
 };
 

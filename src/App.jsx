@@ -2,6 +2,8 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 import { fetchUserData, syncProfile, syncList, syncAllLists, insertActivityEvent } from "./supabaseSync";
 import FriendsModal from "./FriendsModal";
+import BossBattle from "./components/BossBattle.jsx";
+import { applyBossDamage, applyBossHeal, consumeResolutions, subscribeBoss } from "./lib/bossEngine.js";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const DIFFICULTY_BASE       = { Easy: 10, Medium: 25, Hard: 50 };
@@ -946,6 +948,9 @@ export default function App() {
   const [showFriendsModal,setShowFriendsModal]=useState(false);
   const [nudgeQueue,setNudgeQueue]=useState([]);
   const [activeNudge,setActiveNudge]=useState(null);
+  const [gems,setGems]=useState(()=>{try{return JSON.parse(localStorage.getItem("nq_gems"))||0;}catch{return 0;}});
+  const [titles,setTitles]=useState(()=>{try{return JSON.parse(localStorage.getItem("nq_titles"))||[];}catch{return [];}});
+  const [bossResolutions,setBossResolutions]=useState([]);
   const inputRef=useRef();
   const prevXpRef=useRef(0);
   const syncTimers=useRef({});
@@ -966,6 +971,8 @@ export default function App() {
   useEffect(()=>{localStorage.setItem("nq_tasks",JSON.stringify(tasks));},[tasks]);
   useEffect(()=>{localStorage.setItem("nq_completed",JSON.stringify(completed));},[completed]);
   useEffect(()=>{localStorage.setItem("nq_missed",JSON.stringify(missed));},[missed]);
+  useEffect(()=>{localStorage.setItem("nq_gems",JSON.stringify(gems));},[gems]);
+  useEffect(()=>{localStorage.setItem("nq_titles",JSON.stringify(titles));},[titles]);
   useEffect(()=>{ if(screen==="game") music.startMusic(); },[screen]);
 
   // Nudge queue — show one at a time, mark seen, then advance
@@ -997,6 +1004,7 @@ export default function App() {
       const p=Math.round((reason==="timer"?TIMER_MISS_PENALTY:DUE_MISS_PENALTY)*mult);
       penalty+=p; records.push({...tk,missedReason:reason,penalty:p}); removeIds.add(tk.id);
       if(reason==="due"&&tk.repeat&&tk.repeat!=="none") respawns.push(defaultQuest({...tk,dueDate:advanceDue(tk.dueDate,tk.repeat,tk.repeatEvery),timerMissed:false}));
+      applyBossHeal(String(tk.id));
     });
     setTasks(prev=>[...prev.filter(x=>!removeIds.has(x.id)),...respawns]);
     setMissed(prev=>[...records,...prev]);
@@ -1110,6 +1118,20 @@ export default function App() {
     })();
   },[authUser?.id]);
 
+  // On mount: consume offline boss resolutions → credit gems/titles → surface for toast
+  useEffect(()=>{
+    const offline=consumeResolutions();
+    offline.forEach(r=>{setGems(p=>p+r.gems);if(r.title)setTitles(p=>[...p,r.title]);});
+    if(offline.length)setBossResolutions(offline);
+    const unsub=subscribeBoss(e=>{
+      if(e.type!=='boss:resolved')return;
+      setGems(p=>p+e.gems);
+      if(e.title)setTitles(p=>[...p,e.title]);
+      setBossResolutions(prev=>[...prev,e]);
+    });
+    return unsub;
+  },[]);
+
   // Realtime subscription — pushes DB changes instantly to this client so multi-device
   // state converges without polling. recency guard in refreshFromCloud blocks echo from
   // our own writes so we don't pull back data we just pushed.
@@ -1155,7 +1177,7 @@ export default function App() {
     lastLocalChangeRef.current = Date.now();
     clearTimeout(syncTimers.current.profile);
     const streak=computeStreak(completed);
-    syncTimers.current.profile = setTimeout(()=>syncProfile(authUser.id,{playerName,xp,themeKey,streak,completedCount:completed.length}),150);
+    syncTimers.current.profile = setTimeout(()=>syncProfile(authUser.id,{playerName,xp,themeKey,streak,completedCount:completed.length,gems,titles,bossState:localStorage.getItem('nq_boss_v1')}),150);
   },[playerName,xp,themeKey,completed,authUser]);
   useEffect(()=>{
     if (!authUser) return;
@@ -1209,6 +1231,7 @@ export default function App() {
     setCompleted(prev=>[{...task,awardedXp:total,timing,completedAt:Date.now()},...prev]);
   play("complete");applyXp(total);
   if(authUser) insertActivityEvent(authUser.id,total);
+  applyBossDamage(total,{taskId:String(task.id),importance:task.importance,completedAt:Date.now(),dueAt:task.dueDate??null,onTime:timing==="early"||timing==="ontime"},Date.now());
   };
   const deleteTask=id=>{setTasks(prev=>prev.filter(x=>x.id!==id));if(editingId===id)resetForm();play("delete");};
   const deleteMissed=id=>{setMissed(prev=>prev.filter(x=>x.id!==id));play("delete");};
@@ -1318,7 +1341,7 @@ export default function App() {
               </div>
 
               <div style={{ animation:"slideIn 0.25s ease" }}>
-                {tab==="active"&&(tasks.length===0?<div style={{ textAlign:"center",padding:"48px 0" }}><div style={{ fontFamily:"'Orbitron',monospace",fontSize:12,color:`${t.primary}44`,letterSpacing:"0.15em",marginBottom:8 }}>NO ACTIVE QUESTS</div><div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:`${t.accent}66` }}>Add your first quest above to get started!</div></div>:tasks.map((task,i)=><QuestCard key={task.id} task={task} now={now} t={t} onComplete={completeTask} onDelete={deleteTask} onEdit={startEdit} onMove={moveTask} isFirst={i===0} isLast={i===tasks.length-1}/>))}
+                {tab==="active"&&(<><BossBattle t={t} pendingResolutions={bossResolutions}/>{tasks.length===0?<div style={{ textAlign:"center",padding:"48px 0" }}><div style={{ fontFamily:"'Orbitron',monospace",fontSize:12,color:`${t.primary}44`,letterSpacing:"0.15em",marginBottom:8 }}>NO ACTIVE QUESTS</div><div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:`${t.accent}66` }}>Add your first quest above to get started!</div></div>:tasks.map((task,i)=><QuestCard key={task.id} task={task} now={now} t={t} onComplete={completeTask} onDelete={deleteTask} onEdit={startEdit} onMove={moveTask} isFirst={i===0} isLast={i===tasks.length-1}/>)}</>)}
 
                 {tab==="missed"&&(missed.length===0?<div style={{ textAlign:"center",padding:"48px 0" }}><div style={{ fontFamily:"'Orbitron',monospace",fontSize:12,color:`${t.primary}44`,letterSpacing:"0.15em",marginBottom:8 }}>NOTHING MISSED</div><div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:`${t.accent}66` }}>Beat your timers and deadlines to keep this empty.</div></div>:<>{missed.map((task,i)=><MissedCard key={`${task.id}-${i}`} task={task} onDelete={deleteMissed} t={t}/>)}<div style={{ marginTop:16,textAlign:"center" }}>{clearConfirm==="missed"?<div style={{ display:"flex",gap:10,justifyContent:"center" }}><span style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:t.accent,alignSelf:"center" }}>Clear missed log?</span><button onClick={()=>{setMissed([]);setClearConfirm(null);}} style={{ padding:"7px 16px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"rgba(255,80,80,0.2)",border:"1px solid #ff6060",borderRadius:7,color:"#ff6060",cursor:"pointer" }}>YES</button><button onClick={()=>setClearConfirm(null)} style={{ padding:"7px 16px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"transparent",border:`1px solid ${t.border}`,borderRadius:7,color:t.accent,cursor:"pointer" }}>NO</button></div>:<button onClick={()=>setClearConfirm("missed")} style={{ padding:"8px 20px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"transparent",border:"1px solid rgba(255,80,80,0.3)",borderRadius:8,color:"#ff6060",cursor:"pointer",letterSpacing:"0.1em" }}>CLEAR LOG</button>}</div></>)}
 
