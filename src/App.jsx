@@ -4,6 +4,17 @@ import { fetchUserData, syncProfile, syncList, syncAllLists, insertActivityEvent
 import FriendsModal from "./FriendsModal";
 import BossBattle from "./components/BossBattle.jsx";
 import { StreakCard, StreakToast } from "./components/StreakCard.jsx";
+import { TrialPanel, TrialToast } from "./components/TrialPanel.jsx";
+import {
+  isTrialRunning as trialIsRunning,
+  recordTrialTask as trialRecordTask,
+  completeCheck as trialCompleteCheck,
+  abandonTrial as trialAbandon,
+  consumeRewards as trialConsumeRewards,
+  getTrialState,
+  subscribeTrial,
+  CONFIG as TRIAL_CONFIG,
+} from "./lib/trialEngine.js";
 import { applyBossDamage, applyBossHeal, consumeResolutions, subscribeBoss } from "./lib/bossEngine.js";
 import {
   checkIn as streakCheckIn,
@@ -970,6 +981,8 @@ export default function App() {
   const [bossResolutions,setBossResolutions]=useState([]);
   const [streakState,setStreakState]=useState(()=>getStreakState());
   const [streakToasts,setStreakToasts]=useState([]);
+  const [trialState,setTrialState]=useState(()=>getTrialState());
+  const [trialToasts,setTrialToasts]=useState([]);
   const inputRef=useRef();
   const prevXpRef=useRef(0);
   const syncTimers=useRef({});
@@ -1009,6 +1022,11 @@ export default function App() {
     const t=setTimeout(()=>setStreakToasts(prev=>prev.slice(1)),3800);
     return()=>clearTimeout(t);
   },[streakToasts]);
+  useEffect(()=>{
+    if(!trialToasts.length)return;
+    const t=setTimeout(()=>setTrialToasts(prev=>prev.slice(1)),4500);
+    return()=>clearTimeout(t);
+  },[trialToasts]);
 
   useEffect(()=>{
     const prevLv=Math.floor(prevXpRef.current/XP_PER_LEVEL)+1;
@@ -1179,7 +1197,15 @@ export default function App() {
       }
     });
     if(offline.length)setBossResolutions(offline);
-    const unsub=subscribeBoss(e=>{
+
+    // Integration point 3: trial completeCheck on mount (resolves any trial that finished while app was closed)
+    trialCompleteCheck(Date.now());
+    const tr=trialConsumeRewards();
+    tr.forEach(r=>{if(r.xp>0)applyXp(r.xp);if(r.gems>0)setGems(g=>g+r.gems);});
+    if(tr.length)setTrialToasts(prev=>[...prev,...tr]);
+    setTrialState(getTrialState());
+
+    const unsubBoss=subscribeBoss(e=>{
       if(e.type!=='boss:resolved')return;
       setGems(p=>p+e.gems);
       if(e.title)setTitles(p=>[...p,e.title]);
@@ -1191,7 +1217,14 @@ export default function App() {
       }
       setBossResolutions(prev=>[...prev,e]);
     });
-    return unsub;
+    const unsubTrial=subscribeTrial(e=>{
+      if(e.type!=='trial:resolved')return;
+      const tq=trialConsumeRewards();
+      tq.forEach(r=>{if(r.xp>0)applyXp(r.xp);if(r.gems>0)setGems(g=>g+r.gems);});
+      if(tq.length)setTrialToasts(prev=>[...prev,...tq]);
+      setTrialState(getTrialState());
+    });
+    return()=>{unsubBoss();unsubTrial();};
   },[]);
 
   // Realtime subscription — pushes DB changes instantly to this client so multi-device
@@ -1239,7 +1272,7 @@ export default function App() {
     lastLocalChangeRef.current = Date.now();
     clearTimeout(syncTimers.current.profile);
     const streak=computeStreak(completed);
-    syncTimers.current.profile = setTimeout(()=>syncProfile(authUser.id,{playerName,xp,themeKey,streak,completedCount:completed.length,gems,titles,bossState:localStorage.getItem('nq_boss_v1'),streakState:localStorage.getItem('nq_streak_v1')}),150);
+    syncTimers.current.profile = setTimeout(()=>syncProfile(authUser.id,{playerName,xp,themeKey,streak,completedCount:completed.length,gems,titles,bossState:localStorage.getItem('nq_boss_v1'),streakState:localStorage.getItem('nq_streak_v1'),trialState:localStorage.getItem('nq_trial_v1')}),150);
   },[playerName,xp,themeKey,completed,authUser]);
   useEffect(()=>{
     if (!authUser) return;
@@ -1293,7 +1326,12 @@ export default function App() {
     setCompleted(prev=>[{...task,awardedXp:total,timing,completedAt:Date.now()},...prev]);
   play("complete");applyXp(total);
   if(authUser) insertActivityEvent(authUser.id,total);
-  applyBossDamage(total,{taskId:String(task.id),importance:task.importance,completedAt:Date.now(),dueAt:task.dueDate??null,onTime:timing==="early"||timing==="ontime"},Date.now());
+  // Integration point 1: apply trial damage multiplier when a sprint is running (boss damage only; player XP unchanged)
+  const now_t=Date.now();
+  const trialRunning=trialIsRunning(now_t);
+  const bossDmg=trialRunning?Math.round(total*TRIAL_CONFIG.TRIAL_DAMAGE_MULT):total;
+  if(trialRunning){trialRecordTask();setTrialState(getTrialState());}
+  applyBossDamage(bossDmg,{taskId:String(task.id),importance:task.importance,completedAt:now_t,dueAt:task.dueDate??null,onTime:timing==="early"||timing==="ontime"},now_t);
   // Integration point 2: streak task completion
   streakTaskDone(Date.now());
   const sr=streakConsumeRewards();
@@ -1303,6 +1341,7 @@ export default function App() {
   };
   const deleteTask=id=>{setTasks(prev=>prev.filter(x=>x.id!==id));if(editingId===id)resetForm();play("delete");};
   const handleBuyFreeze=()=>{const res=streakBuyFreeze();if(res.ok){setGems(g=>Math.max(0,g-res.cost));setStreakState(getStreakState());};};
+  const handleAbandonTrial=()=>{trialAbandon(Date.now());const tq=trialConsumeRewards();tq.forEach(r=>{if(r.xp>0)applyXp(r.xp);if(r.gems>0)setGems(g=>g+r.gems);});if(tq.length)setTrialToasts(prev=>[...prev,...tq]);setTrialState(getTrialState());};
   const deleteMissed=id=>{setMissed(prev=>prev.filter(x=>x.id!==id));play("delete");};
   const handleDeleteAccount = async () => {
     setDeleteError("");
@@ -1342,6 +1381,7 @@ export default function App() {
           <NudgeFlash nudge={activeNudge} t={t}/>
           <XPPopup popups={popups} t={t}/>
           <StreakToast toasts={streakToasts} t={t}/>
+          <TrialToast toasts={trialToasts} t={t}/>
           <div style={{ minHeight:"100vh",background:t.bgGrad,fontFamily:"'Exo 2',sans-serif",position:"relative",overflow:"hidden" }}>
             <div style={{ position:"fixed",inset:0,pointerEvents:"none",zIndex:0,backgroundImage:`linear-gradient(${t.grid} 1px,transparent 1px),linear-gradient(90deg,${t.grid} 1px,transparent 1px)`,backgroundSize:"60px 60px",animation:"gridMove 4s linear infinite" }}/>
             <div style={{ position:"fixed",top:-120,left:-80,width:400,height:400,borderRadius:"50%",background:`radial-gradient(circle,${t.orb1} 0%,transparent 70%)`,pointerEvents:"none",zIndex:0 }}/>
@@ -1411,7 +1451,7 @@ export default function App() {
               </div>
 
               <div style={{ animation:"slideIn 0.25s ease" }}>
-                {tab==="active"&&(<><BossBattle t={t} pendingResolutions={bossResolutions}/><StreakCard streakState={streakState} gems={gems} onBuyFreeze={handleBuyFreeze} t={t}/>{tasks.length===0?<div style={{ textAlign:"center",padding:"48px 0" }}><div style={{ fontFamily:"'Orbitron',monospace",fontSize:12,color:`${t.primary}44`,letterSpacing:"0.15em",marginBottom:8 }}>NO ACTIVE QUESTS</div><div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:`${t.accent}66` }}>Add your first quest above to get started!</div></div>:tasks.map((task,i)=><QuestCard key={task.id} task={task} now={now} t={t} onComplete={completeTask} onDelete={deleteTask} onEdit={startEdit} onMove={moveTask} isFirst={i===0} isLast={i===tasks.length-1}/>)}</>)}
+                {tab==="active"&&(<><BossBattle t={t} pendingResolutions={bossResolutions}/><StreakCard streakState={streakState} gems={gems} onBuyFreeze={handleBuyFreeze} t={t}/><TrialPanel trialState={trialState} tasks={tasks} onTrialStateChange={setTrialState} onAbandon={handleAbandonTrial} t={t}/>{tasks.length===0?<div style={{ textAlign:"center",padding:"48px 0" }}><div style={{ fontFamily:"'Orbitron',monospace",fontSize:12,color:`${t.primary}44`,letterSpacing:"0.15em",marginBottom:8 }}>NO ACTIVE QUESTS</div><div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:`${t.accent}66` }}>Add your first quest above to get started!</div></div>:tasks.map((task,i)=><QuestCard key={task.id} task={task} now={now} t={t} onComplete={completeTask} onDelete={deleteTask} onEdit={startEdit} onMove={moveTask} isFirst={i===0} isLast={i===tasks.length-1}/>)}</>)}
 
                 {tab==="missed"&&(missed.length===0?<div style={{ textAlign:"center",padding:"48px 0" }}><div style={{ fontFamily:"'Orbitron',monospace",fontSize:12,color:`${t.primary}44`,letterSpacing:"0.15em",marginBottom:8 }}>NOTHING MISSED</div><div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:`${t.accent}66` }}>Beat your timers and deadlines to keep this empty.</div></div>:<>{missed.map((task,i)=><MissedCard key={`${task.id}-${i}`} task={task} onDelete={deleteMissed} t={t}/>)}<div style={{ marginTop:16,textAlign:"center" }}>{clearConfirm==="missed"?<div style={{ display:"flex",gap:10,justifyContent:"center" }}><span style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:t.accent,alignSelf:"center" }}>Clear missed log?</span><button onClick={()=>{setMissed([]);setClearConfirm(null);}} style={{ padding:"7px 16px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"rgba(255,80,80,0.2)",border:"1px solid #ff6060",borderRadius:7,color:"#ff6060",cursor:"pointer" }}>YES</button><button onClick={()=>setClearConfirm(null)} style={{ padding:"7px 16px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"transparent",border:`1px solid ${t.border}`,borderRadius:7,color:t.accent,cursor:"pointer" }}>NO</button></div>:<button onClick={()=>setClearConfirm("missed")} style={{ padding:"8px 20px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"transparent",border:"1px solid rgba(255,80,80,0.3)",borderRadius:8,color:"#ff6060",cursor:"pointer",letterSpacing:"0.1em" }}>CLEAR LOG</button>}</div></>)}
 
