@@ -950,18 +950,27 @@ export default function App() {
           setProfile({ id: uid, player_name: ls.playerName, xp: ls.xp, theme_key: ls.themeKey });
         } else {
           // Returning user: pull Supabase data down
-          setProfile(data.profile);
-          setPlayerName(data.profile.player_name);
-          setXp(data.profile.xp);
-          setThemeKey(data.profile.theme_key);
-          const hasCloud = data.tasks.length || data.completed.length || data.missed.length;
-          if (!hasCloud && (ls.tasks.length || ls.completed.length || ls.missed.length)) {
-            // Profile exists but tasks table is empty — first task migration
+          // If the profile has all-default values it was auto-created by the DB trigger,
+          // not filled in by the user — prefer local progress in that case.
+          const isDefaultProfile = data.profile.player_name === 'HERO' && data.profile.xp === 0;
+          const hasLocalProgress = ls.playerName !== 'HERO' || ls.xp > 0 || ls.tasks.length || ls.completed.length || ls.missed.length;
+          if (isDefaultProfile && hasLocalProgress) {
+            await syncProfile(uid, { playerName: ls.playerName, xp: ls.xp, themeKey: ls.themeKey });
             await syncAllLists(uid, ls.tasks, ls.completed, ls.missed);
+            setProfile({ id: uid, player_name: ls.playerName, xp: ls.xp, theme_key: ls.themeKey });
           } else {
-            setTasks(data.tasks);
-            setCompleted(data.completed);
-            setMissed(data.missed);
+            setProfile(data.profile);
+            setPlayerName(data.profile.player_name);
+            setXp(data.profile.xp);
+            setThemeKey(data.profile.theme_key);
+            const hasCloud = data.tasks.length || data.completed.length || data.missed.length;
+            if (!hasCloud && (ls.tasks.length || ls.completed.length || ls.missed.length)) {
+              await syncAllLists(uid, ls.tasks, ls.completed, ls.missed);
+            } else {
+              setTasks(data.tasks);
+              setCompleted(data.completed);
+              setMissed(data.missed);
+            }
           }
         }
       } else {
