@@ -781,7 +781,13 @@ function AuthModal({ open, onClose, guestXp, t }) {
   const handleSignIn = async () => {
     if (!email.trim() || !password) return;
     setLoading(true); setError("");
-    const { error: authErr } = await supabase.auth.signInWithPassword({ email, password });
+    let resolvedEmail = email.trim();
+    if (!resolvedEmail.includes("@")) {
+      const { data: found, error: rpcErr } = await supabase.rpc("get_email_by_username", { username_input: resolvedEmail });
+      if (rpcErr || !found) { setError("No account found for that username."); setLoading(false); return; }
+      resolvedEmail = found;
+    }
+    const { error: authErr } = await supabase.auth.signInWithPassword({ email: resolvedEmail, password });
     if (authErr) { setError(authErr.message); setLoading(false); return; }
     setLoading(false); reset(); onClose();
   };
@@ -816,8 +822,8 @@ function AuthModal({ open, onClose, guestXp, t }) {
           ))}
         </div>
 
-        <FieldLabel t={t}>EMAIL</FieldLabel>
-        <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="Enter your email..." style={inp}/>
+        <FieldLabel t={t}>{isSignUp ? "EMAIL" : "EMAIL OR USERNAME"}</FieldLabel>
+        <input type={isSignUp ? "email" : "text"} value={email} onChange={e=>setEmail(e.target.value)} placeholder={isSignUp ? "Enter your email..." : "Email or player name..."} style={inp}/>
         <FieldLabel t={t}>PASSWORD</FieldLabel>
         <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder={isSignUp?"At least 6 characters...":"Enter your password..."}
           style={{...inp,marginBottom:16}} onKeyDown={e=>e.key==="Enter"&&canSubmit&&(isSignUp?handleSignUp():handleSignIn())}/>
