@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { supabase } from "./supabaseClient";
+import { fetchUserData, syncProfile, syncList, syncAllLists } from "./supabaseSync";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const DIFFICULTY_BASE       = { Easy: 10, Medium: 25, Hard: 50 };
@@ -890,6 +891,10 @@ export default function App() {
   const [deleteError,setDeleteError]=useState("");
   const inputRef=useRef();
   const prevXpRef=useRef(0);
+  const syncTimers=useRef({});
+  // Always-current snapshot of local state for use inside async callbacks
+  const localState=useRef({});
+  localState.current={playerName,xp,themeKey,tasks,completed,missed};
   const play=useSound();
   const music=useMusicPlayer();
   const t=THEMES[themeKey];
@@ -929,22 +934,35 @@ export default function App() {
     applyXp(-penalty); play("penalty");
   },[now,tasks,screen]);
 
-  // Listen for Supabase auth changes and sync profile/xp on login
+  // Auth state listener — hydrates from Supabase on login, migrates localStorage on first sync
   useEffect(()=>{
     const { data:{ subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
         setAuthUser(session.user);
-        const { data: prof } = await supabase.from("profiles").select("*").eq("id",session.user.id).single();
-        if (prof) {
-          setProfile(prof);
-          setXp(prof.xp);
+        const uid = session.user.id;
+        const data = await fetchUserData(uid);
+        if (!data) return; // offline — localStorage state already loaded
+        const ls = localState.current;
+        if (!data.profile) {
+          // Brand-new account: push current local progress up to Supabase
+          await syncProfile(uid, { playerName: ls.playerName, xp: ls.xp, themeKey: ls.themeKey });
+          await syncAllLists(uid, ls.tasks, ls.completed, ls.missed);
+          setProfile({ id: uid, player_name: ls.playerName, xp: ls.xp, theme_key: ls.themeKey });
         } else {
-          // First Google sign-in — create a default profile with current guest progress
-          const defaultUsername = (session.user.email?.split("@")[0] || "hero").toUpperCase();
-          const curLevel = Math.floor(xp / XP_PER_LEVEL) + 1;
-          await supabase.from("profiles").insert({ id:session.user.id, username:defaultUsername, email:session.user.email, xp, level:curLevel });
-          const { data: newProf } = await supabase.from("profiles").select("*").eq("id",session.user.id).single();
-          if (newProf) setProfile(newProf);
+          // Returning user: pull Supabase data down
+          setProfile(data.profile);
+          setPlayerName(data.profile.player_name);
+          setXp(data.profile.xp);
+          setThemeKey(data.profile.theme_key);
+          const hasCloud = data.tasks.length || data.completed.length || data.missed.length;
+          if (!hasCloud && (ls.tasks.length || ls.completed.length || ls.missed.length)) {
+            // Profile exists but tasks table is empty — first task migration
+            await syncAllLists(uid, ls.tasks, ls.completed, ls.missed);
+          } else {
+            setTasks(data.tasks);
+            setCompleted(data.completed);
+            setMissed(data.missed);
+          }
         }
       } else {
         setAuthUser(null);
@@ -954,12 +972,27 @@ export default function App() {
     return () => subscription.unsubscribe();
   },[]);
 
-  // Sync xp/level back to Supabase whenever it changes for logged-in users
+  // Write-through: sync profile + each task list to Supabase on any change (debounced 800ms)
   useEffect(()=>{
     if (!authUser) return;
-    const derived = Math.floor(xp / XP_PER_LEVEL) + 1;
-    supabase.from("profiles").update({ xp, level:derived }).eq("id",authUser.id);
-  },[xp, authUser]);
+    clearTimeout(syncTimers.current.profile);
+    syncTimers.current.profile = setTimeout(()=>syncProfile(authUser.id,{playerName,xp,themeKey}),800);
+  },[playerName,xp,themeKey,authUser]);
+  useEffect(()=>{
+    if (!authUser) return;
+    clearTimeout(syncTimers.current.tasks);
+    syncTimers.current.tasks = setTimeout(()=>syncList(authUser.id,'active',tasks),800);
+  },[tasks,authUser]);
+  useEffect(()=>{
+    if (!authUser) return;
+    clearTimeout(syncTimers.current.completed);
+    syncTimers.current.completed = setTimeout(()=>syncList(authUser.id,'completed',completed),800);
+  },[completed,authUser]);
+  useEffect(()=>{
+    if (!authUser) return;
+    clearTimeout(syncTimers.current.missed);
+    syncTimers.current.missed = setTimeout(()=>syncList(authUser.id,'missed',missed),800);
+  },[missed,authUser]);
 
   const buildFromForm=()=>{
     const q={title:form.title.trim(),difficulty:form.difficulty,importance:form.importance,scheduleType:form.schedule,timerDeadline:null,timerSeconds:null,timerMissed:false,dueDate:null,repeat:"none",repeatEvery:Math.max(1,Math.round(Number(form.repeatEvery)||1))};
@@ -1047,7 +1080,7 @@ export default function App() {
                   {authUser ? (
                     <div style={{ display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6 }}>
                       <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                        <span style={{ fontFamily:"'Orbitron',monospace",fontSize:9,color:t.accent,letterSpacing:"0.1em" }}>{profile?.username||authUser.email?.split("@")[0]?.toUpperCase()}</span>
+                        <span style={{ fontFamily:"'Orbitron',monospace",fontSize:9,color:t.accent,letterSpacing:"0.1em" }}>{profile?.player_name||authUser.email?.split("@")[0]?.toUpperCase()}</span>
                         <button onClick={()=>supabase.auth.signOut()} style={{ padding:"5px 12px",fontFamily:"'Orbitron',monospace",fontSize:8,letterSpacing:"0.1em",background:"transparent",border:`1px solid ${t.border}`,borderRadius:6,cursor:"pointer",color:t.accent,transition:"all 0.2s" }}>SIGN OUT</button>
                         <button onClick={()=>setDeleteConfirm(true)} style={{ padding:"5px 12px",fontFamily:"'Orbitron',monospace",fontSize:8,letterSpacing:"0.1em",background:"transparent",border:"1px solid rgba(255,80,80,0.35)",borderRadius:6,cursor:"pointer",color:t.danger,transition:"all 0.2s" }}>DELETE ACCOUNT</button>
                       </div>
