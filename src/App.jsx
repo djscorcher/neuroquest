@@ -29,12 +29,12 @@ import {
   loadRemoteState as streakLoadRemote,
 } from "./lib/streakEngine.js";
 
-// ── Constants ──────────────────────────────────────────────────────────────
-const DIFFICULTY_BASE       = { Easy: 10, Medium: 25, Hard: 50 };
-const IMPORTANCE_MULT       = { Low: 1.0, Medium: 1.25, High: 1.5, Critical: 2.0 };
-const MAX_TIMING_BONUS_RATE = 1.0;
-const XP_PER_LEVEL = 100;
+import {
+  DIFFICULTY_BASE, IMPORTANCE_MULT, MAX_TIMING_BONUS_RATE, XP_PER_LEVEL,
+  TIMER_MISS_PENALTY, DUE_MISS_PENALTY, RANKS,
+} from "./config/balance.js";
 
+// ── Constants ──────────────────────────────────────────────────────────────
 const IMPORTANCE = {
   Low:      { label: "Low",      color: "#7eb8ff" },
   Medium:   { label: "Medium",   color: "#00b4ff" },
@@ -43,14 +43,6 @@ const IMPORTANCE = {
 };
 const IMPORTANCE_ORDER = ["Low", "Medium", "High", "Critical"];
 
-const TIMER_MISS_PENALTY = 10;
-const DUE_MISS_PENALTY   = 15;
-
-const RANKS = [
-  { min:1,  label:"RECRUIT"   }, { min:5,  label:"WARRIOR"   },
-  { min:10, label:"VETERAN"   }, { min:20, label:"ELITE"      },
-  { min:35, label:"CHAMPION"  }, { min:50, label:"LEGEND"     },
-];
 const getRank = lvl => [...RANKS].reverse().find(r=>lvl>=r.min)?.label ?? "RECRUIT";
 
 const computeXp = (task, now) => {
