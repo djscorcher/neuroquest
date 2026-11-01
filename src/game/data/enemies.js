@@ -5,6 +5,7 @@ export const ENEMIES = {
     id: 'fogling', name: 'Fogling', sprite: 'fogling',
     stats: { hp: 16, atk: 4, def: 0 },
     drops: { first: ['fangring'], always: ['ember'] },
+    respawns: true, // comes back each time you enter the world
   },
   fogwarden: {
     id: 'fogwarden', name: 'Fog Warden', sprite: 'fogwarden',

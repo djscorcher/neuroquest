@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import PhaserGame from './phaser/PhaserGame.jsx';
 import { EventBus } from './phaser/EventBus.js';
-import { getGameState, subscribeGame, tickPlaytime, flushGame, moveTo } from './store.js';
+import { getGameState, subscribeGame, tickPlaytime, flushGame, moveTo, resetWorld } from './store.js';
 import { formatPlaytime } from './engine/playtime.js';
 import { ENEMIES } from './data/enemies.js';
 import { NPCS } from './data/npcs.js';
@@ -18,7 +18,7 @@ import NpcDialog from './ui/NpcDialog.jsx';
 import './ui/game.css';
 
 const TICK_MS = 250;
-const TABS = [['bag', 'Bag'], ['craft', 'Craft'], ['book', 'Book'], ['journal', 'Journal']];
+const TABS = [['bag', 'Bag'], ['craft', 'Craft'], ['book', 'Book'], ['journal', 'Journal'], ['settings', '⚙']];
 
 // Full-screen world. Phaser draws the map; everything else is React on top.
 // Playtime drains only while the player is actively doing something.
@@ -30,6 +30,7 @@ export default function WorldScreen({ tasks, onExit }) {
   const [drawing, setDrawing] = useState(null);   // original being drawn
   const [doorPrompt, setDoorPrompt] = useState(false);
   const [toasts, setToasts] = useState([]);
+  const [confirmReset, setConfirmReset] = useState(false);
   const [idle, setIdle] = useState(false);
   const [, setArtReady] = useState(false);
   const lastActivity = useRef(0); // clock stays paused until the first input
@@ -155,6 +156,20 @@ export default function WorldScreen({ tasks, onExit }) {
           {panel === 'craft' && !outOfTime && <CraftPanel collection={game.collection} onActivity={markActive} onDraw={setDrawing} />}
           {panel === 'book' && <CollectionBook collection={game.collection} onDraw={setDrawing} />}
           {panel === 'journal' && <Journal tasks={tasks} />}
+          {panel === 'settings' && (
+            <div>
+              <h2>Reset world</h2>
+              <p className="nqw-dim">Start the world over: items, pets, originals, NPCs and fog all go back to the beginning. Your playtime is kept.</p>
+              {!confirmReset
+                ? <button className="nqw-btn danger" onClick={() => setConfirmReset(true)}>Reset world…</button>
+                : (
+                  <div className="nqw-row">
+                    <button className="nqw-btn danger" onClick={() => { resetWorld(); setConfirmReset(false); exit(); }}>Yes, reset everything</button>
+                    <button className="nqw-btn" onClick={() => setConfirmReset(false)}>Cancel</button>
+                  </div>
+                )}
+            </div>
+          )}
         </div>
       )}
 

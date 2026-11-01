@@ -1,5 +1,5 @@
 import { useEffect, useState, lazy, Suspense } from 'react';
-import { getGameState, subscribeGame } from '../game/store.js';
+import { getGameState, subscribeGame, respawnEnemies } from '../game/store.js';
 import { formatPlaytime } from '../game/engine/playtime.js';
 
 // The world (Phaser + game UI) is a separate chunk, loaded only when entered,
@@ -20,7 +20,7 @@ export function EnterWorldCard({ tasks, t }) {
           <div style={{ fontFamily:"'Orbitron',monospace",fontSize:22,fontWeight:900,color:t.secondary,lineHeight:1.2,textShadow:`0 0 16px ${t.secondary}` }}>⏳ {formatPlaytime(balanceMs)}</div>
           <div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:12,color:t.accent }}>Finish quests to earn time in the world</div>
         </div>
-        <button onClick={() => setOpen(true)} style={{ fontFamily:"'Orbitron',monospace",fontSize:10,letterSpacing:'0.08em',padding:'12px 16px',borderRadius:10,cursor:'pointer',border:`1px solid ${t.primary}`,background:`${t.primary}22`,color:t.primary,minHeight:44 }}>
+        <button onClick={() => { respawnEnemies(); setOpen(true); }} style={{ fontFamily:"'Orbitron',monospace",fontSize:10,letterSpacing:'0.08em',padding:'12px 16px',borderRadius:10,cursor:'pointer',border:`1px solid ${t.primary}`,background:`${t.primary}22`,color:t.primary,minHeight:44 }}>
           ENTER WORLD ▸
         </button>
       </div>

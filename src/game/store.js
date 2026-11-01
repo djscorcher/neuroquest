@@ -129,6 +129,25 @@ export function resolveBattle(placement, outcome) {
   return { loot, clearedFog: !!enemy.clearsFog };
 }
 
+// Called when entering the world: beaten grunts come back so there's always something to fight.
+export function respawnEnemies() {
+  const s = _get();
+  const area = AREAS[s.world.areaId];
+  const defeated = { ...s.world.defeated };
+  let changed = false;
+  for (const e of area?.enemies ?? []) {
+    const standingThere = s.world.pos.x === e.x && s.world.pos.y === e.y;
+    if (defeated[e.id] && ENEMIES[e.enemyId]?.respawns && !standingThere) { delete defeated[e.id]; changed = true; }
+  }
+  if (changed) _set({ ...s, world: { ...s.world, defeated } });
+}
+
+// Start the world over (collection, map, NPCs). Earned playtime is kept.
+export function resetWorld() {
+  const s = _get();
+  _set({ ...FRESH(), playtime: s.playtime });
+}
+
 // ── Collection / crafting ───────────────────────────────────────────────────
 export function combine(a, b) {
   const s = _get();
