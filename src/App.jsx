@@ -26,6 +26,7 @@ import {
   consumeRewards as streakConsumeRewards,
   getStreakState,
   buyFreeze as streakBuyFreeze,
+  loadRemoteState as streakLoadRemote,
 } from "./lib/streakEngine.js";
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -1114,6 +1115,28 @@ export default function App() {
     setTasks(data.tasks);
     setCompleted(data.completed);
     setMissed(data.missed);
+    const p = data.profile;
+    if (typeof p.gems === 'number') setGems(p.gems);
+    // Only replace state when values differ: a new reference re-fires the write-through
+    // effect, and two devices would then ping-pong writes through Realtime.
+    // Union so a title earned on either device is never lost
+    if (Array.isArray(p.titles)) setTitles(ts => {
+      const merged = [...new Set([...ts, ...p.titles])];
+      return merged.length === ts.length ? ts : merged;
+    });
+    if (p.notify_prefs && typeof p.notify_prefs === 'object') setNotifyPrefs(prev => {
+      const next = { ...FRESH_NOTIFY_PREFS(), ...p.notify_prefs };
+      return JSON.stringify(next) === JSON.stringify(prev) ? prev : next;
+    });
+    if (p.streak_state) {
+      try {
+        const remote = typeof p.streak_state === 'string' ? JSON.parse(p.streak_state) : p.streak_state;
+        const before = JSON.stringify(getStreakState());
+        // Drop the remote reward queue: the other device already credited those rewards
+        streakLoadRemote(JSON.stringify({ ...remote, rewardQueue: [] }));
+        if (JSON.stringify(getStreakState()) !== before) setStreakState(getStreakState());
+      } catch { /* malformed remote streak JSON: keep local state */ }
+    }
   }, [authUser]);
 
   // Re-sync whenever the tab/window regains focus so diverged devices converge
@@ -1311,7 +1334,7 @@ export default function App() {
     clearTimeout(syncTimers.current.profile);
     const streak=computeStreak(completed);
     syncTimers.current.profile = setTimeout(()=>syncProfile(authUser.id,{playerName,xp,themeKey,streak,completedCount:completed.length,gems,titles,bossState:localStorage.getItem('nq_boss_v1'),streakState:localStorage.getItem('nq_streak_v1'),trialState:localStorage.getItem('nq_trial_v1'),notifyPrefs,tz:Intl.DateTimeFormat().resolvedOptions().timeZone}),150);
-  },[playerName,xp,themeKey,completed,authUser]);
+  },[playerName,xp,themeKey,completed,gems,titles,notifyPrefs,streakState,trialState,authUser]);
   useEffect(()=>{
     if (!authUser) return;
     lastLocalChangeRef.current = Date.now();
