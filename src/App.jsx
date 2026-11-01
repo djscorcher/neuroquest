@@ -7,6 +7,7 @@ import { InstallCard } from "./components/InstallCard.jsx";
 import BossBattle from "./components/BossBattle.jsx";
 import { StreakCard, StreakToast } from "./components/StreakCard.jsx";
 import { TrialPanel, TrialToast } from "./components/TrialPanel.jsx";
+import { EnterWorldCard } from "./components/EnterWorldCard.jsx";
 import {
   isTrialRunning as trialIsRunning,
   recordTrialTask as trialRecordTask,
@@ -33,6 +34,7 @@ import {
   DIFFICULTY_BASE, IMPORTANCE_MULT, MAX_TIMING_BONUS_RATE, XP_PER_LEVEL,
   TIMER_MISS_PENALTY, DUE_MISS_PENALTY, RANKS,
 } from "./config/balance.js";
+import { grantTaskPlaytime, grantDayCleared } from "./game/store.js";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const IMPORTANCE = {
@@ -1378,6 +1380,9 @@ export default function App() {
     if(editingId===id)resetForm();
     setCompleted(prev=>[{...task,awardedXp:total,timing,completedAt:Date.now()},...prev]);
   play("complete");applyXp(total);
+  // Real tasks earn world playtime; clearing the whole list pays the Day Cleared bonus
+  grantTaskPlaytime(task.difficulty);
+  if(!repeats&&tasks.every(x=>x.id===id))grantDayCleared();
   if(authUser) insertActivityEvent(authUser.id,total);
   // Integration point 1: apply trial damage multiplier when a sprint is running (boss damage only; player XP unchanged)
   const now_t=Date.now();
@@ -1506,7 +1511,7 @@ export default function App() {
               </div>
 
               <div style={{ animation:"slideIn 0.25s ease" }}>
-                {tab==="active"&&(<><BossBattle t={t} pendingResolutions={bossResolutions}/><StreakCard streakState={streakState} gems={gems} onBuyFreeze={handleBuyFreeze} t={t}/><TrialPanel trialState={trialState} tasks={tasks} onTrialStateChange={setTrialState} onAbandon={handleAbandonTrial} t={t}/>{tasks.length===0?<div style={{ textAlign:"center",padding:"48px 0" }}><div style={{ fontFamily:"'Orbitron',monospace",fontSize:12,color:`${t.primary}44`,letterSpacing:"0.15em",marginBottom:8 }}>NO ACTIVE QUESTS</div><div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:`${t.accent}66` }}>Add your first quest above to get started!</div></div>:tasks.map((task,i)=><QuestCard key={task.id} task={task} now={now} t={t} onComplete={completeTask} onDelete={deleteTask} onEdit={startEdit} onMove={moveTask} isFirst={i===0} isLast={i===tasks.length-1}/>)}</>)}
+                {tab==="active"&&(<><EnterWorldCard tasks={tasks} t={t}/><BossBattle t={t} pendingResolutions={bossResolutions}/><StreakCard streakState={streakState} gems={gems} onBuyFreeze={handleBuyFreeze} t={t}/><TrialPanel trialState={trialState} tasks={tasks} onTrialStateChange={setTrialState} onAbandon={handleAbandonTrial} t={t}/>{tasks.length===0?<div style={{ textAlign:"center",padding:"48px 0" }}><div style={{ fontFamily:"'Orbitron',monospace",fontSize:12,color:`${t.primary}44`,letterSpacing:"0.15em",marginBottom:8 }}>NO ACTIVE QUESTS</div><div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:`${t.accent}66` }}>Add your first quest above to get started!</div></div>:tasks.map((task,i)=><QuestCard key={task.id} task={task} now={now} t={t} onComplete={completeTask} onDelete={deleteTask} onEdit={startEdit} onMove={moveTask} isFirst={i===0} isLast={i===tasks.length-1}/>)}</>)}
 
                 {tab==="missed"&&(missed.length===0?<div style={{ textAlign:"center",padding:"48px 0" }}><div style={{ fontFamily:"'Orbitron',monospace",fontSize:12,color:`${t.primary}44`,letterSpacing:"0.15em",marginBottom:8 }}>NOTHING MISSED</div><div style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:`${t.accent}66` }}>Beat your timers and deadlines to keep this empty.</div></div>:<>{missed.map((task,i)=><MissedCard key={`${task.id}-${i}`} task={task} onDelete={deleteMissed} t={t}/>)}<div style={{ marginTop:16,textAlign:"center" }}>{clearConfirm==="missed"?<div style={{ display:"flex",gap:10,justifyContent:"center" }}><span style={{ fontFamily:"'Exo 2',sans-serif",fontSize:13,color:t.accent,alignSelf:"center" }}>Clear missed log?</span><button onClick={()=>{setMissed([]);setClearConfirm(null);}} style={{ padding:"7px 16px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"rgba(255,80,80,0.2)",border:"1px solid #ff6060",borderRadius:7,color:"#ff6060",cursor:"pointer" }}>YES</button><button onClick={()=>setClearConfirm(null)} style={{ padding:"7px 16px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"transparent",border:`1px solid ${t.border}`,borderRadius:7,color:t.accent,cursor:"pointer" }}>NO</button></div>:<button onClick={()=>setClearConfirm("missed")} style={{ padding:"8px 20px",fontFamily:"'Orbitron',monospace",fontSize:10,background:"transparent",border:"1px solid rgba(255,80,80,0.3)",borderRadius:8,color:"#ff6060",cursor:"pointer",letterSpacing:"0.1em" }}>CLEAR LOG</button>}</div></>)}
 
