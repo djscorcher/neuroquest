@@ -1,6 +1,5 @@
 import Phaser from 'phaser';
 import { EventBus } from '../EventBus.js';
-import { TILE_KEYS } from './Boot.js';
 import { getArea, TILE } from '../../data/areas.js';
 import { ITEMS } from '../../data/items.js';
 import { ENEMIES } from '../../data/enemies.js';
@@ -10,6 +9,23 @@ import { getGameState, moveTo, pickUp } from '../../store.js';
 
 const T = 16;           // tile size in px
 const STEP_MS = 130;    // time to walk one tile
+
+// Frames in Kenney's Tiny Town sheet (row * 12 + col)
+const TOWN = {
+  grass: 0, grassTuft: 1, flowers: 2, dirt: 25,
+  trees: [16],
+  house: [[52, 53, 53, 54], [64, 65, 65, 66], [72, 73, 73, 75]],
+  doorway: 74,
+};
+
+// Top-left of the house block, so each house tile picks its roof/wall piece
+function houseOrigin(tiles) {
+  let x = Infinity, y = Infinity;
+  tiles.forEach((row, ry) => [...row].forEach((ch, rx) => {
+    if (ch === TILE.HOUSE || ch === TILE.DOOR) { x = Math.min(x, rx); y = Math.min(y, ry); }
+  }));
+  return { x, y };
+}
 
 // Top-down grid world: renders the area, moves the player tile by tile
 // (keyboard or tap-to-move), and reports pickups / interactions to React.
@@ -36,7 +52,7 @@ export class World extends Phaser.Scene {
     this.cameras.main.setRoundPixels(true);
 
     // Dark world → light: a dim veil that lifts when the area's fog is cleared
-    this.veil = this.add.rectangle(0, 0, w, h, 0x05070f, 0.38).setOrigin(0).setDepth(20);
+    this.veil = this.add.rectangle(0, 0, w, h, 0x05070f, 0.45).setOrigin(0).setDepth(20);
     if (world.fogCleared[this.area.id]) this.veil.setAlpha(0.08);
 
     this.keys = this.input.keyboard.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT');
@@ -57,12 +73,21 @@ export class World extends Phaser.Scene {
   // ── Rendering ──────────────────────────────────────────────────────────
   drawMap() {
     this.fogImages = [];
+    const house = houseOrigin(this.area.tiles);
     this.area.tiles.forEach((row, y) => {
       [...row].forEach((ch, x) => {
-        const base = ch === TILE.FOG ? '.' : ch;
-        this.add.image(x * T, y * T, `tile-${TILE_KEYS[base]}`).setOrigin(0);
+        const at = (key, frame) => this.add.image(x * T, y * T, key, frame).setOrigin(0);
+        if (ch === TILE.WATER) { at('tile-water'); return; }
+        // Grass under everything else (trees, fog, house have transparent edges)
+        at('town', ch === TILE.FLOWER ? TOWN.flowers : (x * 7 + y * 3) % 5 === 0 ? TOWN.grassTuft : TOWN.grass);
+        if (ch === TILE.PATH) at('town', TOWN.dirt);
+        if (ch === TILE.WALL) at('town', TOWN.trees[(x + y) % TOWN.trees.length]);
+        if (ch === TILE.HOUSE || ch === TILE.DOOR) {
+          const r = Math.min(y - house.y, 2), c = Math.min(x - house.x, 3);
+          at('town', ch === TILE.DOOR ? TOWN.doorway : TOWN.house[r][c]);
+        }
         if (ch === TILE.FOG) {
-          this.fogImages.push(this.add.image(x * T, y * T, 'tile-fog').setOrigin(0).setDepth(15));
+          this.fogImages.push(at('tile-fog').setDepth(15));
         }
       });
     });
@@ -90,6 +115,7 @@ export class World extends Phaser.Scene {
       const def = ENEMIES[e.enemyId];
       const img = this.add.image(e.x * T + 8, e.y * T + 8, def.sprite).setDepth(9);
       if (def.clearsFog) img.setScale(1.5);
+      if (def.id === 'fogling') img.setTint(0xb8b0e0); // foggy purple ghosts
       this.tweens.add({ targets: img, alpha: 0.75, duration: 900, yoyo: true, repeat: -1 });
       this.actorImages.push(img);
     }

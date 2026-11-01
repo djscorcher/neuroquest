@@ -46,6 +46,43 @@ const ART = {
 
 export const ART_KEYS = Object.keys(ART);
 
+// ── Kenney CC0 sprite sheets (16×16 frames, 12 per row, no spacing) ──
+// Keys listed here use real art; anything missing falls back to the code art above.
+const BASE = (import.meta.env?.BASE_URL ?? '/') + 'game/art/kenney/';
+export const SHEETS = { town: BASE + 'tiny-town.png', dungeon: BASE + 'tiny-dungeon.png' };
+export const SHEET_COLS = 12;
+export const SHEET_SPRITES = {
+  player: ['dungeon', 85],   wren: ['dungeon', 99],
+  fogling: ['dungeon', 121], fogwarden: ['dungeon', 110],
+  ember: ['dungeon', 127],   feather: ['town', 119],    dewdrop: ['dungeon', 128],
+  moonmoss: ['town', 17],    glowcap: ['town', 29],
+  mothling: ['dungeon', 120], cinderpup: ['dungeon', 123],
+  spark: ['dungeon', 129],   mend: ['dungeon', 115],    gust: ['dungeon', 130],
+  lanterncharm: ['dungeon', 101], feathercloak: ['dungeon', 102], fangring: ['dungeon', 103],
+};
+
+// Preload sheets for the React menus (Phaser loads its own copy)
+const _sheetImgs = {};
+const _sheetReady = typeof Image === 'undefined' ? Promise.resolve() : Promise.all(
+  Object.entries(SHEETS).map(([k, url]) => new Promise(resolve => {
+    const img = new Image();
+    img.onload = img.onerror = () => resolve();
+    img.src = url;
+    _sheetImgs[k] = img;
+  })),
+);
+export const whenArtReady = () => _sheetReady;
+
+// Copy one 16×16 sheet frame onto a canvas of the given pixel size.
+export function drawSheetFrame(source, frame, size = 16) {
+  const c = document.createElement('canvas');
+  c.width = size; c.height = size;
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(source, (frame % SHEET_COLS) * 16, Math.floor(frame / SHEET_COLS) * 16, 16, 16, 0, 0, size, size);
+  return c;
+}
+
 export function drawArt(key, scale = 2) {
   const art = ART[key] ?? ART.original;
   const c = document.createElement('canvas');
@@ -65,7 +102,16 @@ export function drawArt(key, scale = 2) {
 const _urlCache = new Map();
 export function artUrl(key, scale = 4) {
   const k = `${key}@${scale}`;
-  if (!_urlCache.has(k)) _urlCache.set(k, drawArt(key, scale).toDataURL());
+  if (_urlCache.has(k)) return _urlCache.get(k);
+  const src = SHEET_SPRITES[key];
+  if (src) {
+    const img = _sheetImgs[src[0]];
+    // Sheet not loaded yet: show code art for now, but don't cache it
+    if (!img?.complete || !img.naturalWidth) return drawArt(key, scale).toDataURL();
+    _urlCache.set(k, drawSheetFrame(img, src[1], 8 * scale).toDataURL());
+  } else {
+    _urlCache.set(k, drawArt(key, scale).toDataURL());
+  }
   return _urlCache.get(k);
 }
 

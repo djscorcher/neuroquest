@@ -7,7 +7,7 @@ import { ENEMIES } from './data/enemies.js';
 import { NPCS } from './data/npcs.js';
 import { getArea } from './data/areas.js';
 import { IDLE_TIMEOUT_MS } from '../config/balance.js';
-import { artUrl } from './art/pixelArt.js';
+import { artUrl, whenArtReady } from './art/pixelArt.js';
 import CollectionBook from './ui/CollectionBook.jsx';
 import Bag from './ui/Bag.jsx';
 import CraftPanel from './ui/CraftPanel.jsx';
@@ -31,6 +31,7 @@ export default function WorldScreen({ tasks, onExit }) {
   const [doorPrompt, setDoorPrompt] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [idle, setIdle] = useState(false);
+  const [, setArtReady] = useState(false);
   const lastActivity = useRef(0); // clock stays paused until the first input
   const fightRef = useRef(null);
   const blockingRef = useRef(false);
@@ -41,6 +42,9 @@ export default function WorldScreen({ tasks, onExit }) {
   const blocking = !!(panel || npcId || fight || drawing || doorPrompt || timeUp);
 
   const markActive = useCallback(() => { lastActivity.current = Date.now(); }, []);
+
+  // Re-render menu icons once the sprite sheets have loaded
+  useEffect(() => { whenArtReady().then(() => setArtReady(true)); }, []);
 
   useEffect(() => subscribeGame(e => { if (e.type !== 'game:move') setGame(e.state); }), []);
 
