@@ -26,14 +26,15 @@ import {
   consumeRewards as streakConsumeRewards,
   getStreakState,
   buyFreeze as streakBuyFreeze,
+  loadRemoteState as streakLoadRemote,
 } from "./lib/streakEngine.js";
 
-// ── Constants ──────────────────────────────────────────────────────────────
-const DIFFICULTY_BASE       = { Easy: 10, Medium: 25, Hard: 50 };
-const IMPORTANCE_MULT       = { Low: 1.0, Medium: 1.25, High: 1.5, Critical: 2.0 };
-const MAX_TIMING_BONUS_RATE = 1.0;
-const XP_PER_LEVEL = 100;
+import {
+  DIFFICULTY_BASE, IMPORTANCE_MULT, MAX_TIMING_BONUS_RATE, XP_PER_LEVEL,
+  TIMER_MISS_PENALTY, DUE_MISS_PENALTY, RANKS,
+} from "./config/balance.js";
 
+// ── Constants ──────────────────────────────────────────────────────────────
 const IMPORTANCE = {
   Low:      { label: "Low",      color: "#7eb8ff" },
   Medium:   { label: "Medium",   color: "#00b4ff" },
@@ -42,14 +43,6 @@ const IMPORTANCE = {
 };
 const IMPORTANCE_ORDER = ["Low", "Medium", "High", "Critical"];
 
-const TIMER_MISS_PENALTY = 10;
-const DUE_MISS_PENALTY   = 15;
-
-const RANKS = [
-  { min:1,  label:"RECRUIT"   }, { min:5,  label:"WARRIOR"   },
-  { min:10, label:"VETERAN"   }, { min:20, label:"ELITE"      },
-  { min:35, label:"CHAMPION"  }, { min:50, label:"LEGEND"     },
-];
 const getRank = lvl => [...RANKS].reverse().find(r=>lvl>=r.min)?.label ?? "RECRUIT";
 
 const computeXp = (task, now) => {
@@ -1114,6 +1107,28 @@ export default function App() {
     setTasks(data.tasks);
     setCompleted(data.completed);
     setMissed(data.missed);
+    const p = data.profile;
+    if (typeof p.gems === 'number') setGems(p.gems);
+    // Only replace state when values differ: a new reference re-fires the write-through
+    // effect, and two devices would then ping-pong writes through Realtime.
+    // Union so a title earned on either device is never lost
+    if (Array.isArray(p.titles)) setTitles(ts => {
+      const merged = [...new Set([...ts, ...p.titles])];
+      return merged.length === ts.length ? ts : merged;
+    });
+    if (p.notify_prefs && typeof p.notify_prefs === 'object') setNotifyPrefs(prev => {
+      const next = { ...FRESH_NOTIFY_PREFS(), ...p.notify_prefs };
+      return JSON.stringify(next) === JSON.stringify(prev) ? prev : next;
+    });
+    if (p.streak_state) {
+      try {
+        const remote = typeof p.streak_state === 'string' ? JSON.parse(p.streak_state) : p.streak_state;
+        const before = JSON.stringify(getStreakState());
+        // Drop the remote reward queue: the other device already credited those rewards
+        streakLoadRemote(JSON.stringify({ ...remote, rewardQueue: [] }));
+        if (JSON.stringify(getStreakState()) !== before) setStreakState(getStreakState());
+      } catch { /* malformed remote streak JSON: keep local state */ }
+    }
   }, [authUser]);
 
   // Re-sync whenever the tab/window regains focus so diverged devices converge
@@ -1311,7 +1326,7 @@ export default function App() {
     clearTimeout(syncTimers.current.profile);
     const streak=computeStreak(completed);
     syncTimers.current.profile = setTimeout(()=>syncProfile(authUser.id,{playerName,xp,themeKey,streak,completedCount:completed.length,gems,titles,bossState:localStorage.getItem('nq_boss_v1'),streakState:localStorage.getItem('nq_streak_v1'),trialState:localStorage.getItem('nq_trial_v1'),notifyPrefs,tz:Intl.DateTimeFormat().resolvedOptions().timeZone}),150);
-  },[playerName,xp,themeKey,completed,authUser]);
+  },[playerName,xp,themeKey,completed,gems,titles,notifyPrefs,streakState,trialState,authUser]);
   useEffect(()=>{
     if (!authUser) return;
     lastLocalChangeRef.current = Date.now();
