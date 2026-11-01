@@ -17,3 +17,14 @@ export const RANKS = [
   { min:10, label:"VETERAN"   }, { min:20, label:"ELITE"      },
   { min:35, label:"CHAMPION"  }, { min:50, label:"LEGEND"     },
 ];
+
+// ── Playtime (minutes of game time earned from real life) ───────────────────
+export const PLAYTIME_BY_DIFFICULTY = { Easy: 5, Medium: 15, Hard: 30 };
+export const HABIT_PLAYTIME         = 2;    // per habit checked off
+export const HABIT_DAILY_CAP        = 10;   // max habit minutes per game-day
+export const DAY_CLEARED_BONUS      = 10;   // finishing every task today
+export const IDLE_TIMEOUT_MS        = 10_000; // clock stops after this long with no input
+
+// ── World / combat ──────────────────────────────────────────────────────────
+export const PARTY_PET_SLOTS = 1;
+export const PLAYER_BASE     = { hp: 30, atk: 5, def: 1 };
